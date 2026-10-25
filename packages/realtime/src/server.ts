@@ -1,6 +1,10 @@
 // Point d'entrée du serveur temps réel (une seule instance, CLAUDE.md §4).
+import * as path from "node:path";
 import { SSM_PARAMS } from "@editeur/shared";
-import { createDocumentClient, readSecureParameter, s3BlobStore } from "./aws.ts";
+import { createDocumentClient, readSecureParameter, s3BlobStore, sqsPdfQueue } from "./aws.ts";
+import { consumePdfRequests } from "./pdf/consumer.ts";
+import { PdfGenerator } from "./pdf/generator.ts";
+import { workerRenderer } from "./pdf/worker.ts";
 import { compactPending, createRealtimeServer } from "./realtime.ts";
 import { memoryBlobStore } from "./store.ts";
 
@@ -22,7 +26,7 @@ async function main() {
   const blobs = process.env.BUCKET ? s3BlobStore(process.env.BUCKET) : memoryBlobStore();
   const db = createDocumentClient();
 
-  const { server } = createRealtimeServer({
+  const { server, openState } = createRealtimeServer({
     db,
     blobs,
     hmacSecret,
@@ -33,6 +37,18 @@ async function main() {
   });
   await server.listen();
   log.info({ port: server.address.port }, "serveur temps réel démarré");
+
+  // Génération des PDF (C3) : demandes lues dans la file SQS pdf-requests, rendu
+  // dans un worker thread (bundle pdf-worker.cjs à côté de server.cjs).
+  const generator = new PdfGenerator({
+    db,
+    blobs,
+    render: workerRenderer(path.join(__dirname, "pdf-worker.cjs")),
+    openState,
+    log,
+  });
+  if (process.env.QUEUE_URL) void consumePdfRequests(sqsPdfQueue(process.env.QUEUE_URL), generator, { log });
+  else log.info({}, "QUEUE_URL absent : pas de génération de PDF");
 
   // Reprise après un arrêt brutal : compacter ce qui ne l'a pas été.
   void compactPending({ db, blobs, log }).catch((error: unknown) => log.error({ error }, "reprise des compactions"));

@@ -4,6 +4,13 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@editeur/shared": "0.1.0"
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.15",
+    "@editeur/shared": "0.1.0",
+    "@hocuspocus/provider": "4.7.1",
+    "codemirror": "^6.0.2",
+    "y-codemirror.next": "^0.3.6",
+    "y-protocols": "^1.0.7",
+    "yjs": "^13.6.33"
   }
 }

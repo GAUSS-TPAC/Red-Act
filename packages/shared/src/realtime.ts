@@ -27,7 +27,18 @@ export type ServerMessage =
   /** Modification(s) du client acceptée(s) : écrite(s) dans le journal à `seq`. */
   | { type: "ack"; seq: number }
   /** Refus : le client détruit son Y.Doc avant toute reconnexion. `finLe` en ms epoch. */
-  | { type: "refus"; code: RefusalCode; raison: string; finLe?: number };
+  | { type: "refus"; code: RefusalCode; raison: string; finLe?: number }
+  /** Version nommée enregistrée (instantané immédiat). */
+  | { type: "version-enregistree"; seq: number; label: string }
+  /** Version restaurée : appliquée comme une nouvelle modification, écrite à `seq`. */
+  | { type: "restauree"; seq: number }
+  | { type: "erreur"; message: string };
+
+/** Messages « stateless » envoyés par le client (JSON). */
+export type ClientMessage =
+  | { type: "enregistrer"; label: string }
+  /** Restaurer = réappliquer le contenu de cet instantané (§5) ; ne consomme pas de crédit. */
+  | { type: "restaurer"; snapshotKey: string };
 
 /** Clé S3 d'un instantané du document à la séquence `seq`. */
 export const snapshotKey = (docId: string, seq: number) => `snapshots/${docId}/${seq}.bin`;

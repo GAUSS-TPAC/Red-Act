@@ -13,7 +13,7 @@ import * as Y from "yjs";
 
 /** Stockage des instantanés : S3 sur AWS, mémoire dans les tests. */
 export interface BlobStore {
-  put(key: string, body: Uint8Array): Promise<void>;
+  put(key: string, body: Uint8Array, contentType?: string): Promise<void>;
   get(key: string): Promise<Uint8Array>;
 }
 
@@ -34,6 +34,7 @@ export function memoryBlobStore(): BlobStore & { blobs: Map<string, Uint8Array> 
 
 export interface LoadedDocument {
   doc: Y.Doc;
+  title: string;
   seq: number;
   snapshotSeq: number;
 }
@@ -53,12 +54,15 @@ export async function loadDocument(
 
   let expected = item.snapshotSeq + 1;
   let ExclusiveStartKey: Record<string, unknown> | undefined;
-  do {
+  // BETWEEN exige from ≤ to : rien à lire si l'instantané est à jour.
+  if (item.seq > item.snapshotSeq) do {
     const page = await db.send(
       new QueryCommand({
         TableName: TABLES.journal.tableName,
-        KeyConditionExpression: "docId = :d AND seq > :s",
-        ExpressionAttributeValues: { ":d": docId, ":s": item.snapshotSeq },
+        // Bornée à `seq` lu juste avant : un commit qui arrive pendant la lecture
+        // (document ouvert ailleurs) ne fausse pas l'état chargé.
+        KeyConditionExpression: "docId = :d AND seq BETWEEN :from AND :to",
+        ExpressionAttributeValues: { ":d": docId, ":from": item.snapshotSeq + 1, ":to": item.seq },
         ConsistentRead: true,
         ExclusiveStartKey,
       }),
@@ -73,12 +77,14 @@ export async function loadDocument(
   } while (ExclusiveStartKey);
   if (expected !== item.seq + 1) throw new Error(`journal de ${docId} incomplet : ${expected - 1} < ${item.seq}`);
 
-  return { doc, seq: item.seq, snapshotSeq: item.snapshotSeq };
+  return { doc, title: item.title, seq: item.seq, snapshotSeq: item.snapshotSeq };
 }
 
 /**
  * `state` doit être l'état complet du document à la séquence `seq` exactement
  * (capturé de façon synchrone juste après un commit).
+ * Le pointeur du document n'avance que vers un instantané plus récent. Une version
+ * est enregistrée si le pointeur a avancé (compaction) ou si elle est nommée.
  * Renvoie false si un instantané plus récent existait déjà.
  */
 export async function saveSnapshot(
@@ -88,9 +94,11 @@ export async function saveSnapshot(
   seq: number,
   state: Uint8Array,
   now: number,
+  named?: { label: string; author: string },
 ): Promise<boolean> {
   const key = snapshotKey(docId, seq);
   await blobs.put(key, state);
+  let advanced = true;
   try {
     await db.send(
       new UpdateCommand({
@@ -102,15 +110,17 @@ export async function saveSnapshot(
       }),
     );
   } catch (error) {
-    if (error instanceof ConditionalCheckFailedException) return false;
-    throw error;
+    if (!(error instanceof ConditionalCheckFailedException)) throw error;
+    advanced = false;
   }
   // Chaque instantané de compaction est aussi une version restaurable (§5).
-  await db.send(
-    new PutCommand({
-      TableName: TABLES.versions.tableName,
-      Item: { docId, createdAt: now, snapshotKey: key, seq, label: "automatique" },
-    }),
-  );
-  return true;
+  if (advanced || named) {
+    await db.send(
+      new PutCommand({
+        TableName: TABLES.versions.tableName,
+        Item: { docId, createdAt: now, snapshotKey: key, seq, label: named?.label ?? "automatique", author: named?.author },
+      }),
+    );
+  }
+  return advanced;
 }

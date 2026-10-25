@@ -132,6 +132,16 @@ describe("calcul et diffusion", () => {
     });
   });
 
+  it("met en cache les fichiers du front (/assets/*) seulement", () => {
+    template.hasResourceProperties("AWS::CloudFront::Distribution", {
+      DistributionConfig: Match.objectLike({
+        CacheBehaviors: [
+          Match.objectLike({ PathPattern: "/assets/*", CachePolicyId: "658327ea-f89d-4fab-a63d-7e88639e58f6" }),
+        ],
+      }),
+    });
+  });
+
   it("ne met rien en cache dans CloudFront et force HTTPS", () => {
     template.hasResourceProperties("AWS::CloudFront::Distribution", {
       DistributionConfig: Match.objectLike({

@@ -11,19 +11,22 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p packages/web",
     "test": "npm run build && vitest run",
     "local:db": "docker compose up -d dynamodb-local",
     "local:db:stop": "docker compose down",
     "local:tables": "node scripts/run-ts.mjs scripts/create-local-tables.ts",
     "synth": "npm run build && npm --workspace infra run synth",
     "test:c1": "node scripts/run-ts.mjs tests/c1/run-c1.ts",
-    "test:c2": "node scripts/run-ts.mjs tests/c2/run-c2.ts"
+    "test:c2": "node scripts/run-ts.mjs tests/c2/run-c2.ts",
+    "test:c3": "node scripts/run-ts.mjs tests/c3/run-c3.ts",
+    "dev": "npm run build && node scripts/run-ts.mjs scripts/dev.ts"
   },
   "devDependencies": {
     "@aws-sdk/client-dynamodb": "^3.1156.0",
     "@hocuspocus/provider": "4.7.1",
     "@types/node": "^20.19.43",
+    "@types/pdfkit": "^0.17.7",
     "@types/ws": "^8.18.2",
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2",

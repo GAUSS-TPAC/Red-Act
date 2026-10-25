@@ -13,3 +13,10 @@ export const pdfKey = (docId: string, seq: number) => `pdf/${docId}/${seq}.pdf`;
 
 /** Durée de validité des URL pré-signées de téléchargement. */
 export const PDF_URL_TTL_SECONDS = 60;
+
+/** Demande de génération de PDF (file SQS `pdf-requests`, CLAUDE.md §7, validée par Alan). */
+export interface PdfRequest {
+  docId: string;
+  /** Le PDF doit contenir au moins les modifications jusqu'à cette séquence. */
+  seqRequis: number;
+}

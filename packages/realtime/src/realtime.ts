@@ -13,8 +13,10 @@ import { ScanCommand, GetCommand, type DynamoDBDocumentClient } from "@aws-sdk/l
 import {
   REFUSAL,
   TABLES,
+  TEXT_NAME,
   nextUtcMidnight,
   verifySessionToken,
+  type ClientMessage,
   type DocumentItem,
   type RefusalCode,
   type ServerMessage,
@@ -46,6 +48,8 @@ export interface RealtimeDeps {
 }
 
 interface OpenDocument {
+  /** Copie de référence (document Hocuspocus). */
+  doc: Y.Doc;
   committer: DocumentCommitter;
   snapshotSeq: number;
   lastSnapshotAt: number;
@@ -124,6 +128,7 @@ export function createRealtimeServer(deps: RealtimeDeps) {
       if (!loaded) throw new Error(`document inconnu : ${documentName}`);
       Y.applyUpdate(document, Y.encodeStateAsUpdate(loaded.doc));
       const entry: OpenDocument = {
+        doc: document,
         snapshotSeq: loaded.snapshotSeq,
         lastSnapshotAt: now(),
         committer: new DocumentCommitter({
@@ -165,6 +170,53 @@ export function createRealtimeServer(deps: RealtimeDeps) {
       }
     },
 
+    // Versions (§5) : « enregistrer » = instantané immédiat nommé ; « restaurer » =
+    // réappliquer un ancien contenu comme une NOUVELLE modification, écrite dans le
+    // journal avant d'être appliquée (comme toute modification), sans débit de crédit.
+    async onStateless({ connection, documentName, document, payload }) {
+      const entry = open.get(documentName);
+      if (!entry) return;
+      const writer = (connection.context as Writer).email;
+      const reply = (message: ServerMessage) => connection.sendStateless(JSON.stringify(message));
+      let message: ClientMessage;
+      try {
+        message = JSON.parse(payload) as ClientMessage;
+      } catch {
+        return;
+      }
+      try {
+        if (message.type === "enregistrer") {
+          const seq = entry.committer.seq; // état et séquence lus ensemble, sans await
+          const state = Y.encodeStateAsUpdate(document);
+          const label = String(message.label ?? "").trim().slice(0, 80) || "Version sans nom";
+          await saveSnapshot(deps.db, deps.blobs, documentName, seq, state, now(), { label, author: writer });
+          reply({ type: "version-enregistree", seq, label });
+        } else if (message.type === "restaurer") {
+          if (typeof message.snapshotKey !== "string" || !message.snapshotKey.startsWith(`snapshots/${documentName}/`)) {
+            reply({ type: "erreur", message: "version inconnue" });
+            return;
+          }
+          const old = new Y.Doc();
+          Y.applyUpdate(old, await deps.blobs.get(message.snapshotKey));
+          const content = old.getText(TEXT_NAME).toString();
+          // Copie de travail de l'état actuel : on y remplace le texte et on capture l'update.
+          const work = new Y.Doc();
+          Y.applyUpdate(work, Y.encodeStateAsUpdate(document));
+          const before = Y.encodeStateVector(work);
+          const text = work.getText(TEXT_NAME);
+          work.transact(() => {
+            text.delete(0, text.length);
+            text.insert(0, content);
+          });
+          const seq = await entry.committer.submit(Y.encodeStateAsUpdate(work, before), writer, 0);
+          reply({ type: "restauree", seq });
+        }
+      } catch (error) {
+        deps.log?.error({ error, docId: documentName }, "opération de version impossible");
+        reply({ type: "erreur", message: error instanceof Refusal ? error.reason : "opération impossible" });
+      }
+    },
+
     // Dernier client parti : on attend les écritures en cours, puis instantané.
     async beforeUnloadDocument({ documentName, document }) {
       const entry = open.get(documentName);
@@ -176,7 +228,13 @@ export function createRealtimeServer(deps: RealtimeDeps) {
     },
   });
 
-  return { server, open };
+  /** Texte et séquence d'un document ouvert, lus ensemble de façon synchrone (PDF, C3). */
+  const openState = (docId: string) => {
+    const entry = open.get(docId);
+    return entry && { text: entry.doc.getText(TEXT_NAME).toString(), seq: entry.committer.seq };
+  };
+
+  return { server, open, openState };
 }
 
 /**

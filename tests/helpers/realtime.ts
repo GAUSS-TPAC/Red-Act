@@ -15,7 +15,7 @@ import { TEST_SECRET } from "./local-api.ts";
 export async function startRealtime(db: DynamoDBDocumentClient, options: Partial<RealtimeDeps> = {}) {
   const blobs = memoryBlobStore();
   const refusals: { writer: string; code: number }[] = [];
-  const { server, open } = createRealtimeServer({
+  const { server, open, openState } = createRealtimeServer({
     db,
     blobs,
     hmacSecret: TEST_SECRET,
@@ -24,7 +24,7 @@ export async function startRealtime(db: DynamoDBDocumentClient, options: Partial
     ...options,
   });
   await server.listen();
-  return { server, open, blobs, refusals, url: `ws://127.0.0.1:${server.address.port}/collab` };
+  return { server, open, openState, blobs, refusals, url: `ws://127.0.0.1:${server.address.port}/collab` };
 }
 
 export async function createDocument(db: DynamoDBDocumentClient, editors: string[]): Promise<string> {
@@ -53,6 +53,8 @@ export class TestWriter {
   /** Retard de confirmation de chaque modification : envoi → ack. */
   readonly confirmations: { sentAt: number; ms: number }[] = [];
   refusal: Extract<ServerMessage, { type: "refus" }> | undefined;
+  /** Autres messages du serveur (versions, erreurs). */
+  readonly messages: ServerMessage[] = [];
   closedReason: string | undefined;
   private readonly sentAt: number[] = [];
 
@@ -73,8 +75,10 @@ export class TestWriter {
           this.acks.push(message.seq);
           const sentAt = this.sentAt.shift();
           if (sentAt !== undefined) this.confirmations.push({ sentAt, ms: performance.now() - sentAt });
-        } else {
+        } else if (message.type === "refus") {
           this.refusal = message;
+        } else {
+          this.messages.push(message);
         }
       },
       onClose: ({ event }) => {

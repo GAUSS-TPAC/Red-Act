@@ -28,7 +28,10 @@ const REALTIME_PORT = 1234;
  * le journal et les crédits ne sont écrits que par le serveur temps réel.
  */
 const API_TABLE_ACTIONS: Partial<Record<TableKey, string[]>> = {
-  documents: ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"],
+  // Scan : liste des documents d'un rédacteur (filtrée sur editors).
+  documents: ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Scan"],
+  // Lecture seule : affichage du crédit restant (seul le temps réel l'écrit).
+  credits: ["dynamodb:GetItem"],
   links: ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Query"],
   reservations: ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"],
   blocks: ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Scan"],
@@ -279,6 +282,15 @@ export class MainStack extends Stack {
         allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
         cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
         originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_AND_CLOUDFRONT_2022,
+      },
+      // Fichiers du front nommés par leur empreinte : mis en cache à la périphérie,
+      // le pic de visiteurs (C5) ne les redemande pas aux instances API.
+      additionalBehaviors: {
+        "/assets/*": {
+          origin: new origins.LoadBalancerV2Origin(alb, { protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY }),
+          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+          cachePolicy: cloudfront.CachePolicy.CACHING_OPTIMIZED,
+        },
       },
     });
 

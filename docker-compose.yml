@@ -1,7 +1,7 @@
 # DynamoDB Local pour le développement et les tests (aucune ressource AWS).
 services:
   dynamodb-local:
-    image: amazon/dynamodb-local:latest
+    image: amazon/dynamodb-local:3.3.2 # même version que le jar utilisé pour les tests
     command: ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-inMemory"]
     ports:
       - "8000:8000"

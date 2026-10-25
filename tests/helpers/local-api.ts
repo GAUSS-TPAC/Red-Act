@@ -13,8 +13,14 @@ export interface LocalApi {
   lastCopies: LinkItem[];
 }
 
-/** Une instance = une mémoire « épuisé » propre, comme une instance EC2. */
-export function createLocalApi(now?: () => number): LocalApi {
+/**
+ * Une instance = une mémoire « épuisé » propre, comme une instance EC2.
+ * `requestPdf` : branchement direct sur un générateur (tests C3), à la place de la file SQS.
+ */
+export function createLocalApi(
+  now?: () => number,
+  options: { requestPdf?: (docId: string, seqRequis: number) => Promise<void> } = {},
+): LocalApi {
   const db = createDocumentClient(LOCAL_ENDPOINT);
   const pdfRequests: LocalApi["pdfRequests"] = [];
   const lastCopies: LinkItem[] = [];
@@ -24,6 +30,7 @@ export function createLocalApi(now?: () => number): LocalApi {
     presign: async (key) => `https://s3.local/${key}?signature=${Math.random().toString(36).slice(2)}`,
     requestPdf: async (docId, seqRequis) => {
       pdfRequests.push({ docId, seqRequis });
+      await options.requestPdf?.(docId, seqRequis);
     },
     onLastCopy: async (link) => {
       lastCopies.push(link);
@@ -31,6 +38,6 @@ export function createLocalApi(now?: () => number): LocalApi {
     log: { error: () => {} },
     now,
   });
-  const app = buildApp({}, { db, hmacSecret: TEST_SECRET, claims, now });
+  const app = buildApp({}, { db, hmacSecret: TEST_SECRET, claims, now, requestPdf: options.requestPdf });
   return { app, pdfRequests, lastCopies };
 }

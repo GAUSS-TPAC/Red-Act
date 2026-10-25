@@ -4,9 +4,11 @@
  */
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteMessageBatchCommand, ReceiveMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
 import { GetParameterCommand, SSMClient } from "@aws-sdk/client-ssm";
 import { DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { REGION } from "@editeur/shared";
+import { REGION, type PdfRequest } from "@editeur/shared";
+import type { PdfQueue } from "./pdf/consumer.ts";
 import type { BlobStore } from "./store.ts";
 
 const region = () => process.env.AWS_REGION ?? REGION;
@@ -22,8 +24,8 @@ export function createDocumentClient(endpoint = process.env.DYNAMODB_ENDPOINT) {
 export function s3BlobStore(bucket: string): BlobStore {
   const s3 = new S3Client({ region: region() });
   return {
-    async put(key, body) {
-      await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: "application/octet-stream" }));
+    async put(key, body, contentType = "application/octet-stream") {
+      await s3.send(new PutObjectCommand({ Bucket: bucket, Key: key, Body: body, ContentType: contentType }));
     },
     async get(key) {
       const result = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
@@ -38,4 +40,30 @@ export async function readSecureParameter(name: string): Promise<string> {
   const value = result.Parameter?.Value;
   if (!value) throw new Error(`Paramètre SSM vide : ${name}`);
   return value;
+}
+
+/** File SQS `pdf-requests` : long polling de 20 s, 10 messages au plus par lecture. */
+export function sqsPdfQueue(queueUrl: string): PdfQueue {
+  const sqs = new SQSClient({ region: region() });
+  return {
+    async receive() {
+      const result = await sqs.send(
+        new ReceiveMessageCommand({ QueueUrl: queueUrl, MaxNumberOfMessages: 10, WaitTimeSeconds: 20 }),
+      );
+      return (result.Messages ?? []).map((m) => ({
+        handle: m.ReceiptHandle!,
+        request: JSON.parse(m.Body!) as PdfRequest,
+      }));
+    },
+    async remove(handles) {
+      for (let i = 0; i < handles.length; i += 10) {
+        await sqs.send(
+          new DeleteMessageBatchCommand({
+            QueueUrl: queueUrl,
+            Entries: handles.slice(i, i + 10).map((handle, k) => ({ Id: String(k), ReceiptHandle: handle })),
+          }),
+        );
+      }
+    },
+  };
 }

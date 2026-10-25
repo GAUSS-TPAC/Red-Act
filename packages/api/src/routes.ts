@@ -1,10 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { ConditionalCheckFailedException } from "@aws-sdk/client-dynamodb";
-import { GetCommand, PutCommand, UpdateCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import {
+  GetCommand,
+  PutCommand,
+  QueryCommand,
+  ScanCommand,
+  UpdateCommand,
+  type DynamoDBDocumentClient,
+} from "@aws-sdk/lib-dynamodb";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   ACTIVE_FLAG,
+  creditKey,
   createSessionToken,
+  DAILY_CREDIT,
   isValidEmail,
   normalizeEmail,
   TABLES,
@@ -19,6 +28,8 @@ export interface RouteDeps {
   db: DynamoDBDocumentClient;
   hmacSecret: string;
   claims: ClaimService;
+  /** Préparation du PDF dès la création d'un lien (§6) : premiers clics servis en 200. */
+  requestPdf?: (docId: string, seqRequis: number) => Promise<void>;
   now?: () => number;
 }
 
@@ -113,6 +124,95 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     },
   );
 
+  // --- Lecture pour le front.
+  const docParams = {
+    type: "object",
+    properties: { docId: { type: "string", pattern: ID_PATTERN } },
+  } as const;
+
+  const readDocument = async (docId: string) =>
+    (
+      await deps.db.send(
+        new GetCommand({
+          TableName: TABLES.documents.tableName,
+          Key: { docId },
+          ProjectionExpression: "docId, title, ownerEmail, editors, seq",
+        }),
+      )
+    ).Item as Pick<DocumentItem, "docId" | "title" | "ownerEmail" | "editors" | "seq"> | undefined;
+
+  // Documents dont on est éditeur. Scan filtré : simple et suffisant pour le journal
+  // d'une association (quelques dizaines de documents) ; un index par éditeur
+  // demanderait une table d'appartenance en plus.
+  app.get("/api/documents", { preHandler: authenticate }, async (request) => {
+    const items: Record<string, unknown>[] = [];
+    let ExclusiveStartKey: Record<string, unknown> | undefined;
+    do {
+      const page = await deps.db.send(
+        new ScanCommand({
+          TableName: TABLES.documents.tableName,
+          FilterExpression: "contains(editors, :moi)",
+          ExpressionAttributeValues: { ":moi": request.writer!.email },
+          ProjectionExpression: "docId, title, ownerEmail",
+          ExclusiveStartKey,
+        }),
+      );
+      items.push(...(page.Items ?? []));
+      ExclusiveStartKey = page.LastEvaluatedKey;
+    } while (ExclusiveStartKey);
+    return { documents: items.sort((a, b) => String(a.title).localeCompare(String(b.title), "fr")) };
+  });
+
+  app.get<{ Params: { docId: string } }>(
+    "/api/documents/:docId",
+    { preHandler: authenticate, schema: { params: docParams } },
+    async (request, reply) => {
+      const doc = await readDocument(request.params.docId);
+      if (!doc) return reply.code(404).send({ erreur: "document-inconnu" });
+      if (!doc.editors.has(request.writer!.email)) return reply.code(403).send({ erreur: "acces-refuse" });
+      return { docId: doc.docId, title: doc.title, ownerEmail: doc.ownerEmail, editors: [...doc.editors].sort(), seq: doc.seq };
+    },
+  );
+
+  app.get<{ Params: { docId: string } }>(
+    "/api/documents/:docId/versions",
+    { preHandler: authenticate, schema: { params: docParams } },
+    async (request, reply) => {
+      const doc = await readDocument(request.params.docId);
+      if (!doc) return reply.code(404).send({ erreur: "document-inconnu" });
+      if (!doc.editors.has(request.writer!.email)) return reply.code(403).send({ erreur: "acces-refuse" });
+      const page = await deps.db.send(
+        new QueryCommand({
+          TableName: TABLES.versions.tableName,
+          KeyConditionExpression: "docId = :d",
+          ExpressionAttributeValues: { ":d": request.params.docId },
+          ScanIndexForward: false,
+          Limit: 50,
+        }),
+      );
+      return {
+        versions: (page.Items ?? []).map((v) => ({
+          createdAt: new Date(v.createdAt as number).toISOString(),
+          seq: v.seq,
+          label: v.label,
+          author: v.author ?? null,
+          snapshotKey: v.snapshotKey,
+        })),
+      };
+    },
+  );
+
+  // Crédit du jour (affichage) ; la garantie C4 reste dans la transaction du serveur temps réel.
+  app.get("/api/me/credit", { preHandler: authenticate }, async (request) => {
+    const item = (
+      await deps.db.send(
+        new GetCommand({ TableName: TABLES.credits.tableName, Key: { pk: creditKey(request.writer!.email, new Date(now())) } }),
+      )
+    ).Item;
+    const used = (item?.used as number | undefined) ?? 0;
+    return { used, remaining: Math.max(0, DAILY_CREDIT - used), limit: DAILY_CREDIT };
+  });
+
   // --- Partage : un éditeur ajoute un autre éditeur (le sujet ne prévoit que des éditeurs).
   app.post<{ Params: { docId: string }; Body: { email: string } }>(
     "/api/documents/:docId/editors",
@@ -192,10 +292,10 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
           new GetCommand({
             TableName: TABLES.documents.tableName,
             Key: { docId: request.params.docId },
-            ProjectionExpression: "ownerEmail, editors",
+            ProjectionExpression: "ownerEmail, editors, seq",
           }),
         )
-      ).Item as Pick<DocumentItem, "ownerEmail" | "editors"> | undefined;
+      ).Item as Pick<DocumentItem, "ownerEmail" | "editors" | "seq"> | undefined;
       if (!doc) return reply.code(404).send({ erreur: "document-inconnu" });
       if (doc.ownerEmail !== writer.email && !doc.editors?.has(writer.email)) {
         return reply.code(403).send({ erreur: "acces-refuse" });
@@ -218,6 +318,10 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
           Item: link,
           ConditionExpression: "attribute_not_exists(linkId)",
         }),
+      );
+      // Le PDF de l'état actuel est préparé tout de suite ; un échec n'empêche pas le lien.
+      await deps.requestPdf?.(link.docId, doc.seq).catch((error: unknown) =>
+        request.log.error({ error, docId: link.docId }, "préparation du PDF impossible"),
       );
       return reply.code(201).send({
         linkId: link.linkId,

@@ -25,3 +25,6 @@ tests/results/raw/*.tmp
 
 # Fichier créé par DynamoDB Local (jar)
 dynamodb-local-metadata.json
+
+# Captures du navigateur de test (Playwright)
+.playwright-mcp/
