@@ -5,5 +5,6 @@ export default defineConfig({
     include: ["packages/*/test/**/*.test.ts", "infra/test/**/*.test.ts", "tests/**/*.test.ts"],
     // La synthèse CDK prend quelques secondes.
     testTimeout: 60_000,
+    hookTimeout: 60_000,
   },
 });

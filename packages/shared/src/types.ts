@@ -8,7 +8,7 @@ export interface DocumentItem {
   editors: Set<string>;
   /** Dernière séquence acceptée du journal. */
   seq: number;
-  /** Séquence du dernier PDF complet dans S3. */
+  /** Séquence du dernier PDF complet dans S3 (-1 : aucun PDF encore). */
   pdfSeq: number;
   snapshotSeq: number;
   snapshotKey?: string;
@@ -49,6 +49,8 @@ export interface LinkItem {
 export interface ReservationItem {
   reservationId: string;
   linkId: string;
+  /** Recopié du lien : évite de relire le lien pour délivrer le PDF. */
+  docId: string;
   seqRequis: number;
   url?: string;
   urlExpiresAt?: number;

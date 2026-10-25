@@ -1,0 +1,111 @@
+{
+  "copies": 1,
+  "requests": 2000,
+  "runs": [
+    {
+      "target": "local",
+      "startedAt": "2026-10-25T11:59:20.000Z",
+      "copies": 1,
+      "requests": 2000,
+      "linkId": "0ac83202-a832-48c6-9055-7f5d5c42270e",
+      "docId": "5e86a6e9-8da0-45d3-b360-54c34c4ddd86",
+      "durationMs": 2633,
+      "statuses": {
+        "202": 1,
+        "410": 1999
+      },
+      "reserved": 1,
+      "latencyMs": {
+        "p50": 1657,
+        "p95": 2006,
+        "p99": 2067,
+        "max": 2081
+      },
+      "replay": {
+        "statuses": {
+          "202": 1
+        },
+        "sameUrl": 0,
+        "newTicket": 0
+      },
+      "networkErrors": 0,
+      "db": {
+        "remaining": 0,
+        "status": "epuise",
+        "activeFlag": null,
+        "reservations": 1
+      },
+      "ok": true
+    },
+    {
+      "target": "local",
+      "startedAt": "2026-10-25T11:59:22.707Z",
+      "copies": 1,
+      "requests": 2000,
+      "linkId": "7e4ad97d-489e-48b8-98f1-1d884d121a0e",
+      "docId": "8966e81e-413f-4c85-8d87-74999c12b14e",
+      "durationMs": 13917,
+      "statuses": {
+        "202": 1,
+        "410": 1999
+      },
+      "reserved": 1,
+      "latencyMs": {
+        "p50": 12653,
+        "p95": 13571,
+        "p99": 13577,
+        "max": 13917
+      },
+      "replay": {
+        "statuses": {
+          "202": 1
+        },
+        "sameUrl": 0,
+        "newTicket": 0
+      },
+      "networkErrors": 0,
+      "db": {
+        "remaining": 0,
+        "status": "epuise",
+        "activeFlag": null,
+        "reservations": 1
+      },
+      "ok": true
+    },
+    {
+      "target": "local",
+      "startedAt": "2026-10-25T11:59:36.686Z",
+      "copies": 1,
+      "requests": 2000,
+      "linkId": "c3334882-e6db-453d-8433-02ea2ef96b24",
+      "docId": "178c2edd-cfa8-4d6f-94d0-9a4abc777ef7",
+      "durationMs": 11198,
+      "statuses": {
+        "202": 1,
+        "410": 1999
+      },
+      "reserved": 1,
+      "latencyMs": {
+        "p50": 9948,
+        "p95": 10884,
+        "p99": 10903,
+        "max": 11198
+      },
+      "replay": {
+        "statuses": {
+          "202": 1
+        },
+        "sameUrl": 0,
+        "newTicket": 0
+      },
+      "networkErrors": 0,
+      "db": {
+        "remaining": 0,
+        "status": "epuise",
+        "activeFlag": null,
+        "reservations": 1
+      },
+      "ok": true
+    }
+  ]
+}

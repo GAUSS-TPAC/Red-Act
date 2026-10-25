@@ -1,6 +1,8 @@
 # Fichiers de travail locaux (non versionnés)
 CLAUDE.md
 docs/
+sujet projet stage.md
+ROADMAP.md
 
 # Dépendances et builds
 node_modules/
@@ -20,3 +22,6 @@ tests/results/raw/*.tmp
 # Divers
 *.log
 .DS_Store
+
+# Fichier créé par DynamoDB Local (jar)
+dynamodb-local-metadata.json
