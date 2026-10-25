@@ -1,0 +1,10 @@
+{
+  "name": "@editeur/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@editeur/shared": "0.1.0",
+    "fastify": "^5.12.7"
+  }
+}

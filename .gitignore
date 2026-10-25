@@ -1,0 +1,22 @@
+# Fichiers de travail locaux (non versionnés)
+CLAUDE.md
+docs/
+
+# Dépendances et builds
+node_modules/
+dist/
+cdk.out/
+coverage/
+
+# Secrets et identifiants (CLAUDE.md §0)
+.env*
+*.pem
+.aws/
+
+# Données et résultats bruts
+*.csv
+tests/results/raw/*.tmp
+
+# Divers
+*.log
+.DS_Store
