@@ -14,6 +14,7 @@ import {
   aws_iam as iam,
   aws_s3 as s3,
   aws_s3_assets as s3assets,
+  aws_sqs as sqs,
 } from "aws-cdk-lib";
 import type { Construct } from "constructs";
 import { SSM_PARAMS, TABLES, type TableDef, type TableKey } from "@editeur/shared";
@@ -91,8 +92,23 @@ export class MainStack extends Stack {
       lifecycleRules: [
         { noncurrentVersionExpiration: Duration.days(30) },
         { abortIncompleteMultipartUploadAfter: Duration.days(1) },
+        // Un PDF ne sert que le temps des téléchargements (URL de 60 s, tickets de 2 min) :
+        // on ne garde pas un fichier par version du document.
+        { prefix: "pdf/", expiration: Duration.days(1), noncurrentVersionExpiration: Duration.days(1) },
       ],
       // Le bucket versionné est vidé par scripts/destroy.sh avant cdk destroy.
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
+    // --- Demandes de PDF de l'API vers le serveur temps réel (§7, validée par Alan).
+    // Une demande n'a d'intérêt que quelques minutes : le visiteur qui patiente la renvoie.
+    const pdfQueue = new sqs.Queue(this, "PdfRequests", {
+      queueName: "editeur-pdf-requests",
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      enforceSSL: true,
+      visibilityTimeout: Duration.seconds(60),
+      receiveMessageWaitTime: Duration.seconds(20),
+      retentionPeriod: Duration.hours(1),
       removalPolicy: RemovalPolicy.DESTROY,
     });
 
@@ -129,6 +145,7 @@ export class MainStack extends Stack {
     }
     // URL pré-signées des PDF : la signature porte les droits du rôle.
     bucket.grantRead(apiRole, "pdf/*");
+    pdfQueue.grantSendMessages(apiRole);
     apiRole.addToPolicy(
       new iam.PolicyStatement({
         actions: ["ssm:GetParameter"],
@@ -142,6 +159,7 @@ export class MainStack extends Stack {
       PORT: String(API_PORT),
       AWS_REGION: this.region,
       BUCKET: bucket.bucketName,
+      QUEUE_URL: pdfQueue.queueUrl,
     });
 
     const apiTemplate = new ec2.LaunchTemplate(this, "ApiTemplate", {
@@ -200,6 +218,8 @@ export class MainStack extends Stack {
       tables[key].grant(realtimeRole, ...actions);
     }
     bucket.grantReadWrite(realtimeRole, "snapshots/*");
+    bucket.grantPut(realtimeRole, "pdf/*");
+    pdfQueue.grantConsumeMessages(realtimeRole);
     realtimeRole.addToPolicy(
       new iam.PolicyStatement({
         actions: ["ssm:GetParameter"],
@@ -216,6 +236,7 @@ export class MainStack extends Stack {
         PORT: String(REALTIME_PORT),
         AWS_REGION: this.region,
         BUCKET: bucket.bucketName,
+        QUEUE_URL: pdfQueue.queueUrl,
       }),
       requireImdsv2: true,
       associatePublicIpAddress: true,

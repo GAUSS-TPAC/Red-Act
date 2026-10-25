@@ -190,9 +190,48 @@ describe("serveur temps réel", () => {
   });
 });
 
+describe("file pdf-requests (C3)", () => {
+  const policyOf = (prefix: string) =>
+    JSON.stringify(Object.entries(template.findResources("AWS::IAM::Policy")).filter(([id]) => id.startsWith(prefix)));
+
+  it("chiffrée, courte durée de vie, long polling", () => {
+    template.hasResourceProperties("AWS::SQS::Queue", {
+      QueueName: "editeur-pdf-requests",
+      SqsManagedSseEnabled: true,
+      MessageRetentionPeriod: 3600,
+      ReceiveMessageWaitTimeSeconds: 20,
+    });
+  });
+
+  it("l'API envoie, le serveur temps réel lit et écrit les PDF", () => {
+    const api = policyOf("ApiRole");
+    const realtime = policyOf("RealtimeRole");
+    expect(api).toContain("sqs:SendMessage");
+    expect(api).not.toContain("sqs:ReceiveMessage");
+    expect(realtime).toContain("sqs:ReceiveMessage");
+    expect(realtime).toContain("sqs:DeleteMessage");
+    expect(realtime).not.toContain("sqs:SendMessage");
+    expect(realtime).toContain("/pdf/*");
+  });
+
+  it("les PDF expirent au bout d'un jour", () => {
+    template.hasResourceProperties("AWS::S3::Bucket", {
+      LifecycleConfiguration: {
+        Rules: Match.arrayWith([Match.objectLike({ Prefix: "pdf/", ExpirationInDays: 1, Status: "Enabled" })]),
+      },
+    });
+  });
+});
+
 describe("tags", () => {
   it("étiquette les ressources projet=editeur-partage", () => {
-    for (const type of ["AWS::DynamoDB::Table", "AWS::S3::Bucket", "AWS::EC2::VPC", "AWS::AutoScaling::AutoScalingGroup"]) {
+    for (const type of [
+      "AWS::DynamoDB::Table",
+      "AWS::S3::Bucket",
+      "AWS::EC2::VPC",
+      "AWS::AutoScaling::AutoScalingGroup",
+      "AWS::SQS::Queue",
+    ]) {
       const resources = Object.values(template.findResources(type));
       expect(resources.length).toBeGreaterThan(0);
       for (const r of resources) {
