@@ -8,8 +8,8 @@
  * Hocuspocus le réapplique sans effet (Yjs est idempotent) et confirme au client
  * (SyncStatus). Lever une erreur dans `beforeSync` ferme la connexion au document.
  */
-import { Server, type Connection } from "@hocuspocus/server";
-import { ScanCommand, GetCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { Server, type Connection, type Document } from "@hocuspocus/server";
+import { ScanCommand, GetCommand, PutCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import {
   REFUSAL,
   TABLES,
@@ -22,12 +22,15 @@ import {
   type ServerMessage,
 } from "@editeur/shared";
 import * as Y from "yjs";
+import { WriterGuard } from "./abuse.ts";
 import { analyzeUpdate } from "./content.ts";
 import { DocumentCommitter, Refusal } from "./committer.ts";
 import { loadDocument, saveSnapshot, type BlobStore } from "./store.ts";
 
 /** Compaction toutes les ~5 min d'activité ou tous les 500 éléments de journal. */
 export const COMPACTION = { maxEntries: 500, maxAgeMs: 5 * 60 * 1000 };
+/** Battement de présence des documents ouverts, pour le tableau de bord (§5). */
+export const PRESENCE_INTERVAL_MS = 30_000;
 
 export interface Writer {
   email: string;
@@ -49,7 +52,8 @@ export interface RealtimeDeps {
 
 interface OpenDocument {
   /** Copie de référence (document Hocuspocus). */
-  doc: Y.Doc;
+  doc: Document;
+  title: string;
   committer: DocumentCommitter;
   snapshotSeq: number;
   lastSnapshotAt: number;
@@ -60,6 +64,7 @@ export function createRealtimeServer(deps: RealtimeDeps) {
   const now = deps.now ?? Date.now;
   const compaction = deps.compaction ?? COMPACTION;
   const open = new Map<string, OpenDocument>();
+  const writers = new WriterGuard(deps.db, now);
 
   const compact = (docId: string, entry: OpenDocument, doc: Y.Doc) => {
     if (entry.compacting || entry.committer.seq <= entry.snapshotSeq) return entry.compacting;
@@ -77,15 +82,21 @@ export function createRealtimeServer(deps: RealtimeDeps) {
   };
 
   const refuse = (connection: Connection<Writer>, writer: string, refusal: Refusal): never => {
+    const finLe = refusal.finLe ?? (refusal.code === REFUSAL.creditEpuise.code ? nextUtcMidnight(now()) : undefined);
     const message: ServerMessage = {
       type: "refus",
       code: refusal.code as RefusalCode,
       raison: refusal.reason,
-      ...(refusal.code === REFUSAL.creditEpuise.code ? { finLe: nextUtcMidnight(now()) } : {}),
+      ...(finLe !== undefined ? { finLe } : {}),
     };
     connection.sendStateless(JSON.stringify(message));
     if (refusal.code === REFUSAL.creditEpuise.code || refusal.code === REFUSAL.bloque.code) {
+      // Chaque fermeture 4001/4003 compte pour l'anti-abus (5 en 1 min → 5 h de blocage).
       deps.onRefusal?.(writer, refusal.code as RefusalCode);
+      void writers
+        .record(writer)
+        .then((until) => until && deps.log?.info({ writer, until: new Date(until).toISOString() }, "rédacteur bloqué"))
+        .catch((error: unknown) => deps.log?.error({ error, writer }, "écriture du blocage impossible"));
     }
     // Hocuspocus ferme la connexion au document avec ce code et cette raison.
     throw Object.assign(new Error(refusal.message), { code: refusal.code, reason: refusal.message });
@@ -120,6 +131,8 @@ export function createRealtimeServer(deps: RealtimeDeps) {
         )
       ).Item as Pick<DocumentItem, "editors"> | undefined;
       if (!doc?.editors.has(session.claims.email)) throw new Error("acces-refuse");
+      // Blocage éventuel (5 h) : la connexion est acceptée, ses modifications seront refusées (4003).
+      await writers.load(session.claims.email);
       return { email: session.claims.email, name: session.claims.name } satisfies Writer;
     },
 
@@ -129,6 +142,7 @@ export function createRealtimeServer(deps: RealtimeDeps) {
       Y.applyUpdate(document, Y.encodeStateAsUpdate(loaded.doc));
       const entry: OpenDocument = {
         doc: document,
+        title: loaded.title,
         snapshotSeq: loaded.snapshotSeq,
         lastSnapshotAt: now(),
         committer: new DocumentCommitter({
@@ -160,6 +174,13 @@ export function createRealtimeServer(deps: RealtimeDeps) {
         return;
       }
       if (analysis.empty) return;
+
+      // Un rédacteur bloqué lit toujours le document ; seules ses modifications sont refusées.
+      const blockedUntil = writers.blocked(context.email);
+      if (blockedUntil !== undefined) {
+        refuse(connection, context.email, new Refusal(REFUSAL.bloque.code, REFUSAL.bloque.raison, blockedUntil));
+        return;
+      }
 
       try {
         const seq = await entry.committer.submit(payload, context.email, analysis.chars);
@@ -218,15 +239,44 @@ export function createRealtimeServer(deps: RealtimeDeps) {
     },
 
     // Dernier client parti : on attend les écritures en cours, puis instantané.
+    // Le document reste enregistré ici : un client peut se reconnecter pendant ces
+    // opérations, et Hocuspocus garde alors le document ouvert.
     async beforeUnloadDocument({ documentName, document }) {
       const entry = open.get(documentName);
       if (!entry) return;
       await entry.committer.drain();
       await entry.compacting;
       await compact(documentName, entry, document);
-      open.delete(documentName);
+    },
+
+    // Déchargement effectif seulement. Un nouveau chargement du même document a pu
+    // avoir lieu entre-temps : on ne retire que l'entrée du document détruit.
+    async afterUnloadDocument({ documentName }) {
+      if (open.get(documentName)?.doc.isDestroyed) open.delete(documentName);
     },
   });
+
+  // Présence : un battement par document ouvert toutes les 30 s (TTL 2 min).
+  const beat = async () => {
+    const at = now();
+    await Promise.all(
+      [...open].map(([docId, entry]) =>
+        deps.db.send(
+          new PutCommand({
+            TableName: TABLES.presence.tableName,
+            Item: {
+              docId,
+              title: entry.title,
+              connected: entry.doc.getConnectionsCount(),
+              lastBeat: at,
+              ttl: Math.floor(at / 1000) + 120,
+            },
+          }),
+        ),
+      ),
+    );
+  };
+  setInterval(() => beat().catch((error: unknown) => deps.log?.error({ error }, "battement de présence")), PRESENCE_INTERVAL_MS).unref();
 
   /** Texte et séquence d'un document ouvert, lus ensemble de façon synchrone (PDF, C3). */
   const openState = (docId: string) => {
@@ -234,7 +284,7 @@ export function createRealtimeServer(deps: RealtimeDeps) {
     return entry && { text: entry.doc.getText(TEXT_NAME).toString(), seq: entry.committer.seq };
   };
 
-  return { server, open, openState };
+  return { server, open, openState, beat };
 }
 
 /**

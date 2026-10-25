@@ -17,6 +17,8 @@ export function createDocumentClient(endpoint = process.env.DYNAMODB_ENDPOINT) {
   const client = new DynamoDBClient({
     region: region(),
     ...(endpoint ? { endpoint, credentials: { accessKeyId: "local", secretAccessKey: "local" } } : {}),
+    // Plafond par défaut du SDK : 50 connexions simultanées (voir l'API).
+    requestHandler: { httpsAgent: { maxSockets: 512, keepAlive: true }, httpAgent: { maxSockets: 512, keepAlive: true } },
   });
   return DynamoDBDocumentClient.from(client, { marshallOptions: { removeUndefinedValues: true } });
 }

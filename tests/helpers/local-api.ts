@@ -1,6 +1,7 @@
 // Instances API branchées sur DynamoDB Local, pour les tests d'intégration et C1.
 import type { LinkItem } from "@editeur/shared";
 import { buildApp } from "../../packages/api/src/app.ts";
+import type { RouteDeps } from "../../packages/api/src/routes.ts";
 import { createDocumentClient } from "../../packages/api/src/aws.ts";
 import { ClaimService } from "../../packages/api/src/links/claim.ts";
 import { LOCAL_ENDPOINT } from "../../scripts/local-tables.ts";
@@ -19,7 +20,10 @@ export interface LocalApi {
  */
 export function createLocalApi(
   now?: () => number,
-  options: { requestPdf?: (docId: string, seqRequis: number) => Promise<void> } = {},
+  options: { requestPdf?: (docId: string, seqRequis: number) => Promise<void> } & Pick<
+    RouteDeps,
+    "visitorGuard" | "scheduleScaling"
+  > & { adminToken?: string } = {},
 ): LocalApi {
   const db = createDocumentClient(LOCAL_ENDPOINT);
   const pdfRequests: LocalApi["pdfRequests"] = [];
@@ -38,6 +42,6 @@ export function createLocalApi(
     log: { error: () => {} },
     now,
   });
-  const app = buildApp({}, { db, hmacSecret: TEST_SECRET, claims, now, requestPdf: options.requestPdf });
+  const app = buildApp({}, { ...options, db, hmacSecret: TEST_SECRET, claims, now });
   return { app, pdfRequests, lastCopies };
 }

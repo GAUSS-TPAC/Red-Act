@@ -33,6 +33,8 @@ export class Refusal extends Error {
   constructor(
     readonly code: number,
     readonly reason: string,
+    /** Fin de la restriction (ms epoch), affichée au client. */
+    readonly finLe?: number,
   ) {
     super(`${code} ${reason}`);
   }

@@ -6,6 +6,7 @@
  *         (le cookie « ticket » est renvoyé automatiquement : aucun exemplaire en plus)
  *   425 → pas encore ouvert : compte à rebours, puis rappel
  *   410 → épuisé : on N'interroge PLUS jamais (C6)
+ *   429 → trop de tentatives depuis cette adresse : attente jusqu'à la fin du blocage
  */
 import { formatDateTime, h, mount } from "../dom.ts";
 
@@ -36,6 +37,7 @@ export function downloadPage(root: HTMLElement, linkId: string) {
       url?: string;
       retryAfter?: number;
       opensAt?: string;
+      finLe?: string;
     };
     const retry = (Number(response.headers.get("Retry-After")) || body.retryAfter || 2) * 1000;
 
@@ -51,6 +53,10 @@ export function downloadPage(root: HTMLElement, linkId: string) {
         return;
       case 425:
         set(`Le téléchargement ouvrira le ${formatDateTime(Date.parse(body.opensAt!))}. Restez sur cette page.`, "attente");
+        timer = setTimeout(claim, retry);
+        return;
+      case 429:
+        set(`Trop de tentatives depuis votre connexion. Nouvel essai automatique à ${formatDateTime(Date.parse(body.finLe!))}.`, "erreur");
         timer = setTimeout(claim, retry);
         return;
       case 410:

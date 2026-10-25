@@ -15,6 +15,9 @@ export function createDocumentClient(endpoint = process.env.DYNAMODB_ENDPOINT) {
   const client = new DynamoDBClient({
     region: process.env.AWS_REGION ?? REGION,
     ...(endpoint ? { endpoint, credentials: LOCAL_CREDENTIALS } : {}),
+    // Le SDK limite par défaut à 50 connexions simultanées vers DynamoDB : pendant un
+    // pic (un clic = 3 à 4 appels), les appels feraient la queue derrière ce plafond.
+    requestHandler: { httpsAgent: { maxSockets: 512, keepAlive: true }, httpAgent: { maxSockets: 512, keepAlive: true } },
   });
   return DynamoDBDocumentClient.from(client, {
     marshallOptions: { removeUndefinedValues: true },
@@ -45,4 +48,15 @@ export async function readSecureParameter(name: string): Promise<string> {
   const value = result.Parameter?.Value;
   if (!value) throw new Error(`Paramètre SSM vide : ${name}`);
   return value;
+}
+
+/** Paramètre SSM String facultatif (undefined s'il n'existe pas). */
+export async function readOptionalParameter(name: string): Promise<string | undefined> {
+  const ssm = new SSMClient({ region: process.env.AWS_REGION ?? REGION });
+  try {
+    return (await ssm.send(new GetParameterCommand({ Name: name }))).Parameter?.Value;
+  } catch (error) {
+    if ((error as { name?: string }).name === "ParameterNotFound") return undefined;
+    throw error;
+  }
 }

@@ -1,5 +1,6 @@
 // Front de l'éditeur partagé : un petit routeur sur l'URL, une page à la fois.
 import "./style.css";
+import { adminPage } from "./pages/admin.ts";
 import { downloadPage } from "./pages/download.ts";
 import { documentsPage } from "./pages/documents.ts";
 import { editorPage } from "./pages/editor.ts";
@@ -21,6 +22,10 @@ function render() {
   const link = path.match(/^\/l\/([0-9a-f-]{36})$/);
   if (link) {
     cleanup = downloadPage(root, link[1]!); // visiteurs anonymes : pas de session
+    return;
+  }
+  if (path === "/admin") {
+    cleanup = adminPage(root); // jeton d'administration, pas d'identité de rédacteur
     return;
   }
   if (!session()) {

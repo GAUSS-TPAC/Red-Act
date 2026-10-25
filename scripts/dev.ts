@@ -43,6 +43,7 @@ async function main() {
       db,
       hmacSecret: SECRET,
       requestPdf,
+      adminToken: "admin-local", // tableau de bord : http://localhost:3000/admin
       claims: new ClaimService({
         db,
         hmacSecret: SECRET,

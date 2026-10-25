@@ -58,3 +58,6 @@ button.grand { font-size: 1.1rem; padding: 12px 24px; margin: 12px 0; }
 .editeur .cm-editor.cm-focused { outline: 2px solid var(--accent); }
 .etat-telechargement { font-size: 1.05rem; min-height: 1.5em; }
 .etat-telechargement[data-etat="epuise"], .etat-telechargement[data-etat="erreur"] { color: var(--erreur); }
+table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--bord); overflow-wrap: anywhere; }
+main.carte + main.carte { margin-top: 16px; }

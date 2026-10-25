@@ -15,7 +15,7 @@ import { TEST_SECRET } from "./local-api.ts";
 export async function startRealtime(db: DynamoDBDocumentClient, options: Partial<RealtimeDeps> = {}) {
   const blobs = memoryBlobStore();
   const refusals: { writer: string; code: number }[] = [];
-  const { server, open, openState } = createRealtimeServer({
+  const { server, open, openState, beat } = createRealtimeServer({
     db,
     blobs,
     hmacSecret: TEST_SECRET,
@@ -24,7 +24,7 @@ export async function startRealtime(db: DynamoDBDocumentClient, options: Partial
     ...options,
   });
   await server.listen();
-  return { server, open, openState, blobs, refusals, url: `ws://127.0.0.1:${server.address.port}/collab` };
+  return { server, open, openState, beat, blobs, refusals, url: `ws://127.0.0.1:${server.address.port}/collab` };
 }
 
 export async function createDocument(db: DynamoDBDocumentClient, editors: string[]): Promise<string> {

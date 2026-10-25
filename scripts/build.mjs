@@ -66,3 +66,24 @@ writeFileSync(
   readFileSync("packages/web/index.html", "utf8").replace("%JS%", js).replace("%CSS%", css),
 );
 console.log(`front : ${publicDir} (${js}, ${css})`);
+
+// Test de charge (étape 7) : scripts Node autonomes + scénario k6, déposés sur
+// l'instance de la LoadTestStack (asset CDK).
+const loadDir = "tests/load/dist";
+rmSync(loadDir, { recursive: true, force: true });
+for (const name of ["prepare", "writers"]) {
+  await build({
+    entryPoints: [`tests/load/${name}.ts`],
+    outfile: `${loadDir}/${name}.cjs`,
+    bundle: true,
+    platform: "node",
+    target: "node20",
+    format: "cjs",
+    logLevel: "warning",
+    define: { "import.meta.url": "__bundleUrl" },
+    banner: { js: 'const __bundleUrl = require("node:url").pathToFileURL(__filename).href;' },
+  });
+}
+cpSync("tests/load/pic.js", `${loadDir}/pic.js`);
+cpSync("tests/load/run.sh", `${loadDir}/run.sh`);
+console.log(`test de charge : ${loadDir}`);

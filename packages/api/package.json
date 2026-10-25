@@ -4,8 +4,10 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@aws-sdk/client-auto-scaling": "^3.1156.0",
     "@aws-sdk/client-dynamodb": "^3.1156.0",
     "@aws-sdk/client-s3": "^3.1156.0",
+    "@aws-sdk/client-ses": "^3.1156.0",
     "@aws-sdk/client-sqs": "^3.1156.0",
     "@aws-sdk/client-ssm": "^3.1156.0",
     "@aws-sdk/lib-dynamodb": "^3.1156.0",

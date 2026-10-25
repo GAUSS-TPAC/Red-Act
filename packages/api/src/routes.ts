@@ -22,6 +22,7 @@ import {
   type LinkItem,
   type SessionClaims,
 } from "@editeur/shared";
+import { viewerIp, type VisitorGuard } from "./abuse.ts";
 import { ClaimService, type ClaimOutcome } from "./links/claim.ts";
 
 export interface RouteDeps {
@@ -30,6 +31,10 @@ export interface RouteDeps {
   claims: ClaimService;
   /** Préparation du PDF dès la création d'un lien (§6) : premiers clics servis en 200. */
   requestPdf?: (docId: string, seqRequis: number) => Promise<void>;
+  /** Anti-abus des visiteurs sur le clic (§8). */
+  visitorGuard?: VisitorGuard;
+  /** Actions programmées sur l'ASG API autour de `opensAt` (§6, pic). */
+  scheduleScaling?: (linkId: string, opensAt: number) => Promise<void>;
   now?: () => number;
 }
 
@@ -319,6 +324,12 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
           ConditionExpression: "attribute_not_exists(linkId)",
         }),
       );
+      // Pic annoncé : instances API montées 10 min avant l'ouverture (échec non bloquant).
+      if (link.opensAt !== undefined) {
+        await deps.scheduleScaling?.(link.linkId, link.opensAt).catch((error: unknown) =>
+          request.log.error({ error, linkId: link.linkId }, "actions programmées impossibles"),
+        );
+      }
       // Le PDF de l'état actuel est préparé tout de suite ; un échec n'empêche pas le lien.
       await deps.requestPdf?.(link.docId, doc.seq).catch((error: unknown) =>
         request.log.error({ error, docId: link.docId }, "préparation du PDF impossible"),
@@ -337,6 +348,16 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     reply.header("Cache-Control", "no-store");
     const { linkId } = request.params;
     if (!new RegExp(ID_PATTERN).test(linkId)) return reply.code(404).send({ etat: "inconnu" });
+
+    const ip = viewerIp(request.headers["cloudfront-viewer-address"]);
+    const blockedUntil = ip ? deps.visitorGuard?.hit(ip) : undefined;
+    if (blockedUntil !== undefined) {
+      const retryAfter = Math.max(1, Math.ceil((blockedUntil - now()) / 1000));
+      return reply
+        .code(429)
+        .header("Retry-After", String(retryAfter))
+        .send({ etat: "bloque", finLe: new Date(blockedUntil).toISOString(), retryAfter });
+    }
 
     const outcome = await deps.claims.claim(linkId, readCookie(request.headers.cookie, TICKET_COOKIE));
     if ("ticket" in outcome && outcome.ticket) {

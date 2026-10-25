@@ -86,9 +86,9 @@ describe("données", () => {
 });
 
 describe("IAM au moindre privilège", () => {
-  it("n'utilise jamais Resource: *", () => {
+  it("n'utilise Resource: * que pour DescribeAutoScalingGroups (lecture seule, non restreignable)", () => {
     const wildcard = statements().filter((s) => s.Resource === "*");
-    expect(wildcard).toEqual([]);
+    expect(wildcard.map((s) => s.Action)).toEqual(["autoscaling:DescribeAutoScalingGroups"]);
   });
 
   it("ne donne aucune action DynamoDB générique", () => {
@@ -193,8 +193,8 @@ describe("serveur temps réel", () => {
       id.startsWith("RealtimeRole"),
     );
     const json = JSON.stringify(policies);
-    for (const table of ["documents", "journal", "credits", "versions"]) expect(json).toContain(`Table${table}`);
-    for (const table of ["links", "reservations", "blocks"]) expect(json).not.toContain(`Table${table}`);
+    for (const table of ["documents", "journal", "credits", "versions", "blocks", "presence"]) expect(json).toContain(`Table${table}`);
+    for (const table of ["links", "reservations"]) expect(json).not.toContain(`Table${table}`);
     expect(json).toContain("/snapshots/*");
     expect(json).not.toContain("admin-token");
   });
@@ -230,6 +230,51 @@ describe("file pdf-requests (C3)", () => {
         Rules: Match.arrayWith([Match.objectLike({ Prefix: "pdf/", ExpirationInDays: 1, Status: "Enabled" })]),
       },
     });
+  });
+});
+
+describe("étape 6 : exploitation", () => {
+  it("l'API ne programme des actions que sur son propre ASG", () => {
+    const policy = JSON.stringify(template.findResources("AWS::IAM::Policy", { Properties: { PolicyName: Match.stringLikeRegexp("ApiScaling") } }));
+    expect(policy).toContain("autoscaling:PutScheduledUpdateGroupAction");
+    expect(policy).toContain("autoScalingGroupName/");
+  });
+
+  it("scaling réactif sur les requêtes par instance", () => {
+    template.hasResourceProperties("AWS::AutoScaling::ScalingPolicy", {
+      PolicyType: "TargetTrackingScaling",
+      TargetTrackingConfiguration: Match.objectLike({
+        PredefinedMetricSpecification: Match.objectLike({ PredefinedMetricType: "ALBRequestCountPerTarget" }),
+      }),
+    });
+  });
+
+  it("journaux dans CloudWatch Logs, 1 semaine, écriture limitée au groupe du service", () => {
+    for (const name of ["api", "realtime"]) {
+      template.hasResourceProperties("AWS::Logs::LogGroup", { LogGroupName: `/editeur/${name}`, RetentionInDays: 7 });
+    }
+    expect(JSON.stringify(statements().filter((s) => [s.Action].flat().includes("logs:PutLogEvents")))).toContain("log-group:/editeur/");
+  });
+
+  it("tags d'instance lisibles par l'API (nom de son ASG)", () => {
+    template.hasResourceProperties("AWS::EC2::LaunchTemplate", {
+      LaunchTemplateData: Match.objectLike({ MetadataOptions: Match.objectLike({ InstanceMetadataTags: "enabled" }) }),
+    });
+  });
+
+  it("SES seulement si un expéditeur est fourni", () => {
+    template.resourceCountIs("AWS::SES::EmailIdentity", 0);
+    const app = new App();
+    const withSes = Template.fromStack(
+      new MainStack(app, "AvecSes", {
+        env: { account: "123456789012", region: REGION },
+        apiBundleDir: path.resolve("packages/api/dist"),
+        realtimeBundleDir: path.resolve("packages/realtime/dist"),
+        sesSender: "journal@exemple.org",
+      }),
+    );
+    withSes.hasResourceProperties("AWS::SES::EmailIdentity", { EmailIdentity: "journal@exemple.org" });
+    expect(JSON.stringify(withSes.findResources("AWS::IAM::Policy"))).toContain("ses:SendEmail");
   });
 });
 

@@ -4,6 +4,13 @@ export const SSM_PARAMS = {
   adminToken: "/editeur/admin-token",
 } as const;
 
+/**
+ * Adresse IP de l'instance de test de charge (String, non secret), créée et supprimée
+ * avec la LoadTestStack : les 15 000 visiteurs simulés partent d'une seule machine,
+ * l'anti-abus des visiteurs l'exempte tant que le test existe.
+ */
+export const LOAD_TEST_IP_PARAM = "/editeur/charge-ip";
+
 export const PROJECT_TAG = { key: "projet", value: "editeur-partage" } as const;
 
 export const REGION = "eu-north-1";

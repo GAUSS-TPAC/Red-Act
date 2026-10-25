@@ -1,4 +1,5 @@
 import {
+  ArnFormat,
   CfnOutput,
   CfnParameter,
   Duration,
@@ -12,12 +13,14 @@ import {
   aws_ec2 as ec2,
   aws_elasticloadbalancingv2 as elbv2,
   aws_iam as iam,
+  aws_logs as logs,
   aws_s3 as s3,
   aws_s3_assets as s3assets,
+  aws_ses as ses,
   aws_sqs as sqs,
 } from "aws-cdk-lib";
 import type { Construct } from "constructs";
-import { SSM_PARAMS, TABLES, type TableDef, type TableKey } from "@editeur/shared";
+import { LOAD_TEST_IP_PARAM, SSM_PARAMS, TABLES, type TableDef, type TableKey } from "@editeur/shared";
 
 const API_PORT = 3000;
 const REALTIME_PORT = 1234;
@@ -50,6 +53,9 @@ const REALTIME_TABLE_ACTIONS: Partial<Record<TableKey, string[]>> = {
   journal: ["dynamodb:PutItem", "dynamodb:Query"],
   credits: ["dynamodb:UpdateItem"],
   versions: ["dynamodb:PutItem"],
+  // Anti-abus des rédacteurs (blocage 5 h) et battement de présence (tableau de bord).
+  blocks: ["dynamodb:GetItem", "dynamodb:PutItem"],
+  presence: ["dynamodb:PutItem"],
 };
 
 export interface MainStackProps extends StackProps {
@@ -57,6 +63,8 @@ export interface MainStackProps extends StackProps {
   apiBundleDir: string;
   /** Dossier du bundle esbuild du serveur temps réel. */
   realtimeBundleDir: string;
+  /** Expéditeur SES vérifié (contexte `-c sesSender=…`) ; sans lui, pas d'e-mail. */
+  sesSender?: string;
 }
 
 export class MainStack extends Stack {
@@ -115,6 +123,15 @@ export class MainStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY,
     });
 
+    // --- Journaux des services (agent CloudWatch sur les instances), 1 semaine.
+    for (const name of ["api", "realtime"]) {
+      new logs.LogGroup(this, `Logs-${name}`, {
+        logGroupName: `/editeur/${name}`,
+        retention: logs.RetentionDays.ONE_WEEK,
+        removalPolicy: RemovalPolicy.DESTROY,
+      });
+    }
+
     // --- Équilibreur : n'accepte que CloudFront.
     const albSg = new ec2.SecurityGroup(this, "AlbSg", {
       vpc,
@@ -152,7 +169,7 @@ export class MainStack extends Stack {
     apiRole.addToPolicy(
       new iam.PolicyStatement({
         actions: ["ssm:GetParameter"],
-        resources: Object.values(SSM_PARAMS).map((name) =>
+        resources: [...Object.values(SSM_PARAMS), LOAD_TEST_IP_PARAM].map((name) =>
           this.formatArn({ service: "ssm", resource: "parameter", resourceName: name.slice(1) }),
         ),
       }),
@@ -163,6 +180,7 @@ export class MainStack extends Stack {
       AWS_REGION: this.region,
       BUCKET: bucket.bucketName,
       QUEUE_URL: pdfQueue.queueUrl,
+      ...(props.sesSender ? { SES_SENDER: props.sesSender } : {}),
     });
 
     const apiTemplate = new ec2.LaunchTemplate(this, "ApiTemplate", {
@@ -172,6 +190,8 @@ export class MainStack extends Stack {
       securityGroup: apiSg,
       userData: apiUserData,
       requireImdsv2: true,
+      // L'API lit le nom de son ASG dans les tags d'instance (seuil 30/N, actions programmées).
+      instanceMetadataTags: true,
       associatePublicIpAddress: true,
     });
 
@@ -196,6 +216,32 @@ export class MainStack extends Stack {
       healthCheck: { path: "/sante", interval: Duration.seconds(15), healthyThresholdCount: 2 },
       deregistrationDelay: Duration.seconds(30),
     });
+    // Scaling réactif sur les requêtes par instance (§4) ; le pic annoncé est anticipé
+    // par les actions programmées que l'API crée autour de `opensAt`.
+    apiAsg.scaleOnRequestCount("RequetesParInstance", { targetRequestsPerMinute: 3000 });
+
+    // Droits Auto Scaling de l'API, dans une politique à part (pas de cycle avec l'ASG) :
+    // actions programmées sur SON ASG seulement ; DescribeAutoScalingGroups n'accepte
+    // pas de restriction de ressource (lecture seule) — exception justifiée du §4.
+    new iam.Policy(this, "ApiScaling", {
+      roles: [apiRole],
+      statements: [
+        new iam.PolicyStatement({
+          actions: ["autoscaling:PutScheduledUpdateGroupAction"],
+          resources: [
+            `arn:${this.partition}:autoscaling:${this.region}:${this.account}:autoScalingGroup:*:autoScalingGroupName/${apiAsg.autoScalingGroupName}`,
+          ],
+        }),
+        new iam.PolicyStatement({ actions: ["autoscaling:DescribeAutoScalingGroups"], resources: ["*"] }),
+      ],
+    });
+
+    // E-mail au créateur d'un lien à son dernier exemplaire (SES, bac à sable).
+    if (props.sesSender) {
+      const sender = new ses.EmailIdentity(this, "Expediteur", { identity: ses.Identity.email(props.sesSender) });
+      sender.grantSendEmail(apiRole);
+    }
+
     // §4 : aucun chemin interne n'est joignable depuis l'extérieur.
     listener.addAction("BloqueInterne", {
       priority: 1,
@@ -308,6 +354,30 @@ export class MainStack extends Stack {
     const id = `${name[0]!.toUpperCase()}${name.slice(1)}Bundle`; // ApiBundle, RealtimeBundle
     const bundle = new s3assets.Asset(this, id, { path: bundleDir });
     bundle.grantRead(role);
+    // Journaux : l'agent CloudWatch n'écrit que dans le groupe du service.
+    const logGroupArn = this.formatArn({
+      service: "logs",
+      resource: "log-group",
+      resourceName: `/editeur/${name}:*`,
+      arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+    });
+    role.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"],
+        resources: [logGroupArn],
+      }),
+    );
+    const agentConfig = JSON.stringify({
+      logs: {
+        logs_collected: {
+          files: {
+            collect_list: [
+              { file_path: `/var/log/editeur/${name}.log`, log_group_name: `/editeur/${name}`, log_stream_name: "{instance_id}" },
+            ],
+          },
+        },
+      },
+    });
     const userData = ec2.UserData.forLinux();
     const zip = userData.addS3DownloadCommand({
       bucket: bundle.bucket,
@@ -316,7 +386,12 @@ export class MainStack extends Stack {
     });
     userData.addCommands(
       "set -euo pipefail",
-      "dnf install -y nodejs20 unzip",
+      "dnf install -y nodejs20 unzip amazon-cloudwatch-agent",
+      "mkdir -p /var/log/editeur",
+      `cat > /opt/aws/amazon-cloudwatch-agent/etc/editeur.json <<'EOF'`,
+      agentConfig,
+      "EOF",
+      "/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -s -c file:/opt/aws/amazon-cloudwatch-agent/etc/editeur.json",
       "useradd --system --no-create-home --shell /sbin/nologin editeur || true",
       `mkdir -p /opt/editeur/${name} /etc/editeur`,
       `unzip -o ${zip} -d /opt/editeur/${name}`,
@@ -331,6 +406,9 @@ export class MainStack extends Stack {
       "User=editeur",
       `EnvironmentFile=/etc/editeur/${name}.env`,
       `ExecStart=/usr/bin/node-20 /opt/editeur/${name}/server.cjs`,
+      // Ouvert par systemd (pas par le service) : envoyé à CloudWatch Logs par l'agent.
+      `StandardOutput=append:/var/log/editeur/${name}.log`,
+      `StandardError=append:/var/log/editeur/${name}.log`,
       "Restart=always",
       // Arrêt propre : le serveur temps réel vide ses écritures et compacte.
       "TimeoutStopSec=30",
