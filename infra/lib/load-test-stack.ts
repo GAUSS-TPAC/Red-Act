@@ -82,8 +82,9 @@ export class LoadTestStack extends Stack {
     const instance = new ec2.Instance(this, "Instance", {
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
-      // 2 vCPU / 4 Go : k6 (~200 req/s) et 300 clients Yjs ; quelques centimes de l'heure.
-      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MEDIUM),
+      // 2 vCPU / 4 Go : k6 (~200 req/s) et 300 clients Yjs. Le compte (plan gratuit)
+      // refuse les types hors offre gratuite (t3.medium refusé) : c7i-flex.large en fait partie.
+      instanceType: new ec2.InstanceType("c7i-flex.large"),
       machineImage: ec2.MachineImage.latestAmazonLinux2023(),
       securityGroup: sg,
       role,

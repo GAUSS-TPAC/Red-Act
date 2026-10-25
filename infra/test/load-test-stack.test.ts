@@ -17,8 +17,8 @@ beforeAll(() => {
 });
 
 describe("LoadTestStack", () => {
-  it("une instance t3.medium, IMDSv2, sans aucun port ouvert", () => {
-    template.hasResourceProperties("AWS::EC2::Instance", { InstanceType: "t3.medium" });
+  it("une instance c7i-flex.large (offre gratuite), IMDSv2, sans aucun port ouvert", () => {
+    template.hasResourceProperties("AWS::EC2::Instance", { InstanceType: "c7i-flex.large" });
     template.hasResourceProperties("AWS::EC2::LaunchTemplate", {
       LaunchTemplateData: Match.objectLike({ MetadataOptions: Match.objectLike({ HttpTokens: "required" }) }),
     });
