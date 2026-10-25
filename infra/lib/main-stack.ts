@@ -19,10 +19,11 @@ import type { Construct } from "constructs";
 import { SSM_PARAMS, TABLES, type TableDef, type TableKey } from "@editeur/shared";
 
 const API_PORT = 3000;
+const REALTIME_PORT = 1234;
 
 /**
  * Actions DynamoDB du rôle API, table par table (moindre privilège).
- * Prévues pour les étapes 2 et 6 du §10 (liens, réservations, admin) ;
+ * Prévues pour les étapes 2 et 6 du §10 (liens, réservations, partage, admin) ;
  * le journal et les crédits ne sont écrits que par le serveur temps réel.
  */
 const API_TABLE_ACTIONS: Partial<Record<TableKey, string[]>> = {
@@ -34,9 +35,24 @@ const API_TABLE_ACTIONS: Partial<Record<TableKey, string[]>> = {
   versions: ["dynamodb:Query"],
 };
 
+/**
+ * Actions DynamoDB du serveur temps réel. TransactWriteItems n'a pas d'action
+ * propre : chaque élément de la transaction est autorisé par son action (§5).
+ */
+const REALTIME_TABLE_ACTIONS: Partial<Record<TableKey, string[]>> = {
+  // GetItem : chargement et droits ; UpdateItem : seq et pointeur d'instantané ;
+  // Scan : reprise des compactions au démarrage.
+  documents: ["dynamodb:GetItem", "dynamodb:UpdateItem", "dynamodb:Scan"],
+  journal: ["dynamodb:PutItem", "dynamodb:Query"],
+  credits: ["dynamodb:UpdateItem"],
+  versions: ["dynamodb:PutItem"],
+};
+
 export interface MainStackProps extends StackProps {
   /** Dossier du bundle esbuild de l'API (`npm run build`). */
   apiBundleDir: string;
+  /** Dossier du bundle esbuild du serveur temps réel. */
+  realtimeBundleDir: string;
 }
 
 export class MainStack extends Stack {
@@ -122,50 +138,18 @@ export class MainStack extends Stack {
       }),
     );
 
-    const apiBundle = new s3assets.Asset(this, "ApiBundle", { path: props.apiBundleDir });
-    apiBundle.grantRead(apiRole);
-
-    const userData = ec2.UserData.forLinux();
-    const zip = userData.addS3DownloadCommand({
-      bucket: apiBundle.bucket,
-      bucketKey: apiBundle.s3ObjectKey,
-      localFile: "/tmp/api.zip",
+    const apiUserData = this.serviceUserData("api", props.apiBundleDir, apiRole, {
+      PORT: String(API_PORT),
+      AWS_REGION: this.region,
+      BUCKET: bucket.bucketName,
     });
-    userData.addCommands(
-      "set -euo pipefail",
-      "dnf install -y nodejs20 unzip",
-      "useradd --system --no-create-home --shell /sbin/nologin editeur || true",
-      "mkdir -p /opt/editeur/api /etc/editeur",
-      `unzip -o ${zip} -d /opt/editeur/api`,
-      "cat > /etc/editeur/api.env <<'EOF'",
-      `PORT=${API_PORT}`,
-      `AWS_REGION=${this.region}`,
-      `BUCKET=${bucket.bucketName}`,
-      "EOF",
-      "cat > /etc/systemd/system/editeur-api.service <<'EOF'",
-      "[Unit]",
-      "Description=Editeur partage - API",
-      "After=network-online.target",
-      "[Service]",
-      "User=editeur",
-      "EnvironmentFile=/etc/editeur/api.env",
-      "ExecStart=/usr/bin/node-20 /opt/editeur/api/server.cjs",
-      "Restart=always",
-      "NoNewPrivileges=true",
-      "ProtectSystem=strict",
-      "[Install]",
-      "WantedBy=multi-user.target",
-      "EOF",
-      "systemctl daemon-reload",
-      "systemctl enable --now editeur-api",
-    );
 
     const apiTemplate = new ec2.LaunchTemplate(this, "ApiTemplate", {
       instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MICRO),
       machineImage: ec2.MachineImage.latestAmazonLinux2023(),
       role: apiRole,
       securityGroup: apiSg,
-      userData,
+      userData: apiUserData,
       requireImdsv2: true,
       associatePublicIpAddress: true,
     });
@@ -198,6 +182,70 @@ export class MainStack extends Stack {
       action: elbv2.ListenerAction.fixedResponse(403, { contentType: "text/plain", messageBody: "Interdit" }),
     });
 
+    // --- Serveur temps réel : UNE seule instance (§4). Mise à jour : l'ancienne est arrêtée
+    // avant le lancement de la nouvelle, jamais deux serveurs actifs sur un même document.
+    const realtimeSg = new ec2.SecurityGroup(this, "RealtimeSg", {
+      vpc,
+      description: "Serveur temps reel - trafic depuis l ALB uniquement",
+    });
+    realtimeSg.addIngressRule(albSg, ec2.Port.tcp(REALTIME_PORT));
+    albSg.addEgressRule(realtimeSg, ec2.Port.tcp(REALTIME_PORT));
+
+    const realtimeRole = new iam.Role(this, "RealtimeRole", {
+      assumedBy: new iam.ServicePrincipal("ec2.amazonaws.com"),
+      description: "Serveur temps reel",
+      managedPolicies: [iam.ManagedPolicy.fromAwsManagedPolicyName("AmazonSSMManagedInstanceCore")],
+    });
+    for (const [key, actions] of Object.entries(REALTIME_TABLE_ACTIONS) as [TableKey, string[]][]) {
+      tables[key].grant(realtimeRole, ...actions);
+    }
+    bucket.grantReadWrite(realtimeRole, "snapshots/*");
+    realtimeRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ["ssm:GetParameter"],
+        resources: [this.formatArn({ service: "ssm", resource: "parameter", resourceName: SSM_PARAMS.hmacSecret.slice(1) })],
+      }),
+    );
+
+    const realtimeTemplate = new ec2.LaunchTemplate(this, "RealtimeTemplate", {
+      instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.SMALL),
+      machineImage: ec2.MachineImage.latestAmazonLinux2023(),
+      role: realtimeRole,
+      securityGroup: realtimeSg,
+      userData: this.serviceUserData("realtime", props.realtimeBundleDir, realtimeRole, {
+        PORT: String(REALTIME_PORT),
+        AWS_REGION: this.region,
+        BUCKET: bucket.bucketName,
+      }),
+      requireImdsv2: true,
+      associatePublicIpAddress: true,
+    });
+
+    const realtimeAsg = new autoscaling.AutoScalingGroup(this, "RealtimeAsg", {
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      launchTemplate: realtimeTemplate,
+      // min = max = 1 : toujours exactement une instance (sans desiredCapacity, que CDK
+      // déconseille car il réinitialise la taille à chaque déploiement).
+      minCapacity: 1,
+      maxCapacity: 1,
+      healthChecks: autoscaling.HealthChecks.withAdditionalChecks({
+        additionalTypes: [autoscaling.AdditionalHealthCheckType.ELB],
+        gracePeriod: Duration.minutes(3),
+      }),
+      updatePolicy: autoscaling.UpdatePolicy.rollingUpdate({ minInstancesInService: 0, maxBatchSize: 1 }),
+    });
+
+    listener.addTargets("Realtime", {
+      priority: 10,
+      conditions: [elbv2.ListenerCondition.pathPatterns(["/collab*"])],
+      port: REALTIME_PORT,
+      protocol: elbv2.ApplicationProtocol.HTTP,
+      targets: [realtimeAsg],
+      healthCheck: { path: "/sante", interval: Duration.seconds(15), healthyThresholdCount: 2 },
+      deregistrationDelay: Duration.seconds(10),
+    });
+
     // --- CloudFront : HTTPS par défaut (*.cloudfront.net), rien en cache, en-têtes du visiteur
     // transmis (CloudFront-Viewer-Address, WebSocket, cookies du ticket).
     const distribution = new cloudfront.Distribution(this, "Cdn", {
@@ -216,6 +264,52 @@ export class MainStack extends Stack {
     new CfnOutput(this, "Url", { value: `https://${distribution.distributionDomainName}` });
     new CfnOutput(this, "BucketName", { value: bucket.bucketName });
     new CfnOutput(this, "ApiAsgName", { value: apiAsg.autoScalingGroupName });
+    new CfnOutput(this, "RealtimeAsgName", { value: realtimeAsg.autoScalingGroupName });
+  }
+
+  /**
+   * User data commun : Node 20, bundle esbuild récupéré via le rôle (asset CDK),
+   * service systemd sous un utilisateur sans droits. Pas de npm install sur l'instance.
+   */
+  private serviceUserData(name: string, bundleDir: string, role: iam.IRole, env: Record<string, string>) {
+    const id = `${name[0]!.toUpperCase()}${name.slice(1)}Bundle`; // ApiBundle, RealtimeBundle
+    const bundle = new s3assets.Asset(this, id, { path: bundleDir });
+    bundle.grantRead(role);
+    const userData = ec2.UserData.forLinux();
+    const zip = userData.addS3DownloadCommand({
+      bucket: bundle.bucket,
+      bucketKey: bundle.s3ObjectKey,
+      localFile: `/tmp/${name}.zip`,
+    });
+    userData.addCommands(
+      "set -euo pipefail",
+      "dnf install -y nodejs20 unzip",
+      "useradd --system --no-create-home --shell /sbin/nologin editeur || true",
+      `mkdir -p /opt/editeur/${name} /etc/editeur`,
+      `unzip -o ${zip} -d /opt/editeur/${name}`,
+      `cat > /etc/editeur/${name}.env <<'EOF'`,
+      ...Object.entries(env).map(([k, v]) => `${k}=${v}`),
+      "EOF",
+      `cat > /etc/systemd/system/editeur-${name}.service <<'EOF'`,
+      "[Unit]",
+      `Description=Editeur partage - ${name}`,
+      "After=network-online.target",
+      "[Service]",
+      "User=editeur",
+      `EnvironmentFile=/etc/editeur/${name}.env`,
+      `ExecStart=/usr/bin/node-20 /opt/editeur/${name}/server.cjs`,
+      "Restart=always",
+      // Arrêt propre : le serveur temps réel vide ses écritures et compacte.
+      "TimeoutStopSec=30",
+      "NoNewPrivileges=true",
+      "ProtectSystem=strict",
+      "[Install]",
+      "WantedBy=multi-user.target",
+      "EOF",
+      "systemctl daemon-reload",
+      `systemctl enable --now editeur-${name}`,
+    );
+    return userData;
   }
 
   private table(key: TableKey, def: TableDef): dynamodb.Table {

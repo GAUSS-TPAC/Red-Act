@@ -12,6 +12,7 @@ beforeAll(() => {
   const stack = new MainStack(app, "Test", {
     env: { account: "123456789012", region: REGION },
     apiBundleDir: path.resolve("packages/api/dist"),
+    realtimeBundleDir: path.resolve("packages/realtime/dist"),
   });
   Tags.of(app).add(PROJECT_TAG.key, PROJECT_TAG.value);
   template = Template.fromStack(stack);
@@ -140,6 +141,52 @@ describe("calcul et diffusion", () => {
         }),
       }),
     });
+  });
+});
+
+describe("serveur temps réel", () => {
+  const realtimeAsg = () =>
+    Object.values(template.findResources("AWS::AutoScaling::AutoScalingGroup")).find(
+      (r) => r.Properties.MaxSize === "1",
+    )!;
+
+  it("une seule instance t3.small, IMDSv2", () => {
+    template.hasResourceProperties("AWS::EC2::LaunchTemplate", {
+      LaunchTemplateData: Match.objectLike({
+        InstanceType: "t3.small",
+        MetadataOptions: Match.objectLike({ HttpTokens: "required" }),
+      }),
+    });
+    expect(realtimeAsg().Properties).toMatchObject({ MinSize: "1", MaxSize: "1" });
+  });
+
+  it("mise à jour : l'ancienne instance est arrêtée avant la nouvelle", () => {
+    expect(realtimeAsg().UpdatePolicy.AutoScalingRollingUpdate).toMatchObject({
+      MinInstancesInService: 0,
+      MaxBatchSize: 1,
+    });
+  });
+
+  it("/collab* est routé vers le serveur temps réel, santé sur /sante", () => {
+    template.hasResourceProperties("AWS::ElasticLoadBalancingV2::ListenerRule", {
+      Conditions: [Match.objectLike({ PathPatternConfig: { Values: ["/collab*"] } })],
+      Actions: [Match.objectLike({ Type: "forward" })],
+    });
+    template.hasResourceProperties("AWS::ElasticLoadBalancingV2::TargetGroup", {
+      HealthCheckPath: "/sante",
+      Port: 1234,
+    });
+  });
+
+  it("le rôle temps réel n'écrit que le journal, le document, les crédits, les versions et les instantanés", () => {
+    const policies = Object.entries(template.findResources("AWS::IAM::Policy")).filter(([id]) =>
+      id.startsWith("RealtimeRole"),
+    );
+    const json = JSON.stringify(policies);
+    for (const table of ["documents", "journal", "credits", "versions"]) expect(json).toContain(`Table${table}`);
+    for (const table of ["links", "reservations", "blocks"]) expect(json).not.toContain(`Table${table}`);
+    expect(json).toContain("/snapshots/*");
+    expect(json).not.toContain("admin-token");
   });
 });
 

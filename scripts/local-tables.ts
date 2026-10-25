@@ -23,13 +23,19 @@ export function localClient(endpoint = LOCAL_ENDPOINT) {
   });
 }
 
+/** Trois essais : sous la charge d'une suite de tests, une JVM occupée peut tarder à répondre. */
 export async function isLocalDbUp(client = localClient()): Promise<boolean> {
-  try {
-    await client.send(new ListTablesCommand({ Limit: 1 }), { abortSignal: AbortSignal.timeout(1500) });
-    return true;
-  } catch {
-    return false;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await client.send(new ListTablesCommand({ Limit: 1 }), { abortSignal: AbortSignal.timeout(5000) });
+      return true;
+    } catch (error) {
+      lastError = error;
+    }
   }
+  console.warn(`DynamoDB Local injoignable (${LOCAL_ENDPOINT}), tests dépendants ignorés : ${String(lastError)}`);
+  return false;
 }
 
 export async function ensureLocalTables(client = localClient(), log: (msg: string) => void = () => {}) {

@@ -101,6 +101,24 @@ describe.skipIf(!dbUp)("liens et clics (DynamoDB Local)", () => {
       expect(response.statusCode).toBe(403);
     });
 
+    it("partage : un éditeur ajoute un éditeur, un non-éditeur ne peut pas", async () => {
+      const { docId, auth } = await setup(1);
+      const share = (headers: Record<string, string>, email: string, id = docId) =>
+        app.inject({ method: "POST", url: `/api/documents/${id}/editors`, headers, payload: { email } });
+
+      expect((await share(auth, " Invite@Test.local")).json()).toEqual({ docId, email: "invite@test.local" });
+      const invite = { authorization: `Bearer ${await session("invite@test.local")}` };
+      // L'invité est éditeur : il peut créer un lien et partager à son tour.
+      const link = await app.inject({ method: "POST", url: `/api/documents/${docId}/links`, headers: invite, payload: { max: 1 } });
+      expect(link.statusCode).toBe(201);
+      expect((await share(invite, "troisieme@test.local")).statusCode).toBe(200);
+
+      const intrus = { authorization: `Bearer ${await session("intrus@test.local")}` };
+      expect((await share(intrus, "complice@test.local")).statusCode).toBe(403);
+      expect((await share(auth, "x@test.local", "00000000-0000-4000-8000-000000000000")).statusCode).toBe(404);
+      expect((await share(auth, "pas-un-email")).statusCode).toBe(400);
+    });
+
     it("refuse un nombre d'exemplaires invalide", async () => {
       const { docId, auth } = await setup(1);
       for (const max of [0, -1, 1.5, 100_001]) {
@@ -150,6 +168,43 @@ describe.skipIf(!dbUp)("liens et clics (DynamoDB Local)", () => {
       expect(again.statusCode).toBe(200);
       expect(again.json().url).toBe(first.json().url);
       expect(await dbState(db, linkId)).toMatchObject({ remaining: 4, reservations: 1 });
+    });
+
+    it("URL expirée, ticket valide : nouvelle URL sur le même PDF, puis stable", async () => {
+      const { docId, linkId } = await setup(5);
+      await pdfReady(docId);
+      const first = await claim(linkId);
+      const ticket = ticketOf(first)!;
+      clock += 61_000; // URL de 60 s expirée, ticket de 2 min encore valide
+
+      const renewed = await claim(linkId, ticket);
+      expect(renewed.statusCode).toBe(200);
+      expect(renewed.json().url).not.toBe(first.json().url);
+      expect(renewed.json().url).toContain(`pdf/${docId}/0.pdf`);
+      expect(Date.parse(renewed.json().expiresAt)).toBe(clock + 60_000);
+
+      await pdfReady(docId, 7); // un PDF plus récent ne change pas l'exemplaire réservé
+      const again = await claim(linkId, ticket, other.app);
+      expect(again.json().url).toBe(renewed.json().url);
+      expect(await dbState(db, linkId)).toMatchObject({ remaining: 4, reservations: 1 });
+      clock -= 61_000;
+    });
+
+    it("deux retours simultanés après expiration : une seule nouvelle URL", async () => {
+      const { docId, linkId } = await setup(5);
+      await pdfReady(docId);
+      const first = await claim(linkId);
+      const ticket = ticketOf(first)!;
+      clock += 61_000;
+
+      const results = await Promise.all(
+        Array.from({ length: 6 }, (_, i) => claim(linkId, ticket, i % 2 ? other.app : app)),
+      );
+      const urls = new Set(results.map((r) => r.json().url as string));
+      expect(results.every((r) => r.statusCode === 200)).toBe(true);
+      expect(urls.size).toBe(1);
+      expect(urls.has(first.json().url)).toBe(false);
+      clock -= 61_000;
     });
 
     it("le détenteur du dernier exemplaire est servi même après l'épuisement", async () => {

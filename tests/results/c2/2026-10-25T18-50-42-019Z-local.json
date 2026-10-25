@@ -1,0 +1,73 @@
+{
+  "target": "local",
+  "startedAt": "2026-10-25T18:50:42.313Z",
+  "docId": "882c5adc-40ed-487e-bad4-7e284bf6b1b9",
+  "clients": 20,
+  "ratePerClient": 8,
+  "durationS": 30,
+  "sent": 4746,
+  "confirmed": 4746,
+  "refusals": 0,
+  "disconnects": 0,
+  "settleMs": 82,
+  "latencyWindows": [
+    {
+      "fromS": 0,
+      "count": 780,
+      "p50": 95,
+      "p95": 142,
+      "max": 160
+    },
+    {
+      "fromS": 5,
+      "count": 798,
+      "p50": 89,
+      "p95": 135,
+      "max": 156
+    },
+    {
+      "fromS": 10,
+      "count": 788,
+      "p50": 94,
+      "p95": 141,
+      "max": 160
+    },
+    {
+      "fromS": 15,
+      "count": 796,
+      "p50": 90,
+      "p95": 141,
+      "max": 150
+    },
+    {
+      "fromS": 20,
+      "count": 798,
+      "p50": 90,
+      "p95": 137,
+      "max": 147
+    },
+    {
+      "fromS": 25,
+      "count": 786,
+      "p50": 90,
+      "p95": 139,
+      "max": 159
+    }
+  ],
+  "latencyTrend": {
+    "firstThirdP95": 139,
+    "lastThirdP95": 138,
+    "growing": false
+  },
+  "convergence": {
+    "clients": 20,
+    "length": 4746,
+    "identicalTexts": true,
+    "identicalStateVectors": true,
+    "persistedMatches": true,
+    "ackedSeqs": 298,
+    "missingAckedSeqs": [],
+    "journalSeq": 298
+  },
+  "ok": true
+}

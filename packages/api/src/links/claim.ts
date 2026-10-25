@@ -142,47 +142,62 @@ export class ClaimService {
     return delivered.kind === "inconnu" ? delivered : { ...delivered, ticket };
   }
 
-  /** Délivre l'exemplaire réservé : toujours la même URL pour une réservation. */
+  /**
+   * Délivre l'exemplaire réservé. Une réservation n'a qu'une URL valide à la fois :
+   * tant qu'elle n'a pas expiré, on renvoie la même ; une fois expirée (ticket encore
+   * valide), on la remplace par une nouvelle sur le même PDF.
+   */
   private async deliver(
     reservation: ReservationItem,
     knownDoc?: Pick<DocumentItem, "seq" | "pdfSeq">,
   ): Promise<Exclude<ClaimOutcome, { kind: "epuise" | "pas-ouvert" }>> {
-    if (reservation.url) {
+    if (reservation.url && (reservation.urlExpiresAt ?? 0) > this.now()) {
       return { kind: "pret", url: reservation.url, expiresAt: reservation.urlExpiresAt ?? 0 };
     }
 
-    const doc = knownDoc ?? (await this.getDocument(reservation.docId));
-    if (!doc) return { kind: "inconnu" };
-
-    if (doc.pdfSeq < reservation.seqRequis) {
-      try {
-        await this.deps.requestPdf(reservation.docId, reservation.seqRequis);
-      } catch (error) {
-        // La réservation reste acquise : le visiteur réessaiera et la demande sera refaite.
-        this.deps.log.error({ error, docId: reservation.docId }, "demande de PDF impossible");
+    let key = reservation.pdfKey;
+    if (!key) {
+      const doc = knownDoc ?? (await this.getDocument(reservation.docId));
+      if (!doc) return { kind: "inconnu" };
+      if (doc.pdfSeq < reservation.seqRequis) {
+        try {
+          await this.deps.requestPdf(reservation.docId, reservation.seqRequis);
+        } catch (error) {
+          // La réservation reste acquise : le visiteur réessaiera et la demande sera refaite.
+          this.deps.log.error({ error, docId: reservation.docId }, "demande de PDF impossible");
+        }
+        return { kind: "patienter", retryAfter: RETRY_AFTER_SECONDS };
       }
-      return { kind: "patienter", retryAfter: RETRY_AFTER_SECONDS };
+      key = pdfKey(reservation.docId, doc.pdfSeq);
     }
 
-    const url = await this.deps.presign(pdfKey(reservation.docId, doc.pdfSeq));
+    const url = await this.deps.presign(key);
     const expiresAt = this.now() + PDF_URL_TTL_SECONDS * 1000;
+    // Première URL : « pas encore d'URL ». Renouvellement : « l'URL expirée est toujours
+    // celle enregistrée ». Deux retours simultanés : un seul gagne, l'autre relit.
+    const renewal = reservation.url !== undefined;
     try {
       await this.deps.db.send(
         new UpdateCommand({
           TableName: TABLES.reservations.tableName,
           Key: { reservationId: reservation.reservationId },
-          UpdateExpression: "SET #url = :url, urlExpiresAt = :exp",
-          ConditionExpression: "attribute_not_exists(#url)",
+          UpdateExpression: "SET #url = :url, urlExpiresAt = :exp, pdfKey = :key",
+          ConditionExpression: renewal ? "urlExpiresAt = :previous" : "attribute_not_exists(#url)",
           ExpressionAttributeNames: { "#url": "url" },
-          ExpressionAttributeValues: { ":url": url, ":exp": expiresAt },
+          ExpressionAttributeValues: {
+            ":url": url,
+            ":exp": expiresAt,
+            ":key": key,
+            ...(renewal ? { ":previous": reservation.urlExpiresAt ?? 0 } : {}),
+          },
         }),
       );
       return { kind: "pret", url, expiresAt };
     } catch (error) {
       if (!(error instanceof ConditionalCheckFailedException)) throw error;
-      // Deux clics simultanés avec le même ticket : on renvoie l'URL enregistrée par l'autre.
       const stored = await this.getReservation(reservation.reservationId);
-      return { kind: "pret", url: stored?.url ?? url, expiresAt: stored?.urlExpiresAt ?? expiresAt };
+      if (!stored?.url) throw error;
+      return { kind: "pret", url: stored.url, expiresAt: stored.urlExpiresAt ?? 0 };
     }
   }
 

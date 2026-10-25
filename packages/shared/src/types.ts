@@ -52,8 +52,11 @@ export interface ReservationItem {
   /** Recopié du lien : évite de relire le lien pour délivrer le PDF. */
   docId: string;
   seqRequis: number;
+  /** URL pré-signée en cours ; remplacée seulement après son expiration. */
   url?: string;
   urlExpiresAt?: number;
+  /** PDF figé à la première URL : un renouvellement pointe sur le même fichier. */
+  pdfKey?: string;
   createdAt: number;
   ttl: number;
 }

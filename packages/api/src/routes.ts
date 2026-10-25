@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { GetCommand, PutCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
+import { ConditionalCheckFailedException } from "@aws-sdk/client-dynamodb";
+import { GetCommand, PutCommand, UpdateCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import {
   ACTIVE_FLAG,
@@ -76,7 +77,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     },
   );
 
-  // --- Documents (création minimale ; partage et édition aux étapes 3 et 5).
+  // --- Documents (création minimale ; liste et édition à l'étape 5).
   app.post<{ Body: { title: string } }>(
     "/api/documents",
     {
@@ -109,6 +110,57 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
         }),
       );
       return reply.code(201).send({ docId: doc.docId, title: doc.title });
+    },
+  );
+
+  // --- Partage : un éditeur ajoute un autre éditeur (le sujet ne prévoit que des éditeurs).
+  app.post<{ Params: { docId: string }; Body: { email: string } }>(
+    "/api/documents/:docId/editors",
+    {
+      preHandler: authenticate,
+      schema: {
+        params: {
+          type: "object",
+          properties: { docId: { type: "string", pattern: ID_PATTERN } },
+        },
+        body: {
+          type: "object",
+          required: ["email"],
+          additionalProperties: false,
+          properties: { email: { type: "string", minLength: 3, maxLength: 254 } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const email = normalizeEmail(request.body.email);
+      if (!isValidEmail(email)) return reply.code(400).send({ erreur: "identite-invalide" });
+      try {
+        // Vérification des droits et ajout en une seule écriture conditionnelle.
+        await deps.db.send(
+          new UpdateCommand({
+            TableName: TABLES.documents.tableName,
+            Key: { docId: request.params.docId },
+            UpdateExpression: "ADD editors :nouveau",
+            ConditionExpression: "attribute_exists(docId) AND contains(editors, :moi)",
+            ExpressionAttributeValues: { ":nouveau": new Set([email]), ":moi": request.writer!.email },
+          }),
+        );
+      } catch (error) {
+        if (!(error instanceof ConditionalCheckFailedException)) throw error;
+        const exists = (
+          await deps.db.send(
+            new GetCommand({
+              TableName: TABLES.documents.tableName,
+              Key: { docId: request.params.docId },
+              ProjectionExpression: "docId",
+            }),
+          )
+        ).Item;
+        return exists
+          ? reply.code(403).send({ erreur: "acces-refuse" })
+          : reply.code(404).send({ erreur: "document-inconnu" });
+      }
+      return { docId: request.params.docId, email };
     },
   );
 

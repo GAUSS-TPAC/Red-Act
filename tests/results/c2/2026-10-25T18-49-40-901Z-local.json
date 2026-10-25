@@ -1,0 +1,73 @@
+{
+  "target": "local",
+  "startedAt": "2026-10-25T18:49:41.193Z",
+  "docId": "721b59dc-df7a-40ad-ae5f-61d0bdcd082c",
+  "clients": 20,
+  "ratePerClient": 8,
+  "durationS": 30,
+  "sent": 4742,
+  "confirmed": 4742,
+  "refusals": 0,
+  "disconnects": 0,
+  "settleMs": 2506,
+  "latencyWindows": [
+    {
+      "fromS": 0,
+      "count": 780,
+      "p50": 301,
+      "p95": 513,
+      "max": 530
+    },
+    {
+      "fromS": 5,
+      "count": 788,
+      "p50": 853,
+      "p95": 1037,
+      "max": 1067
+    },
+    {
+      "fromS": 10,
+      "count": 792,
+      "p50": 1228,
+      "p95": 1321,
+      "max": 1354
+    },
+    {
+      "fromS": 15,
+      "count": 798,
+      "p50": 1479,
+      "p95": 1623,
+      "max": 1690
+    },
+    {
+      "fromS": 20,
+      "count": 791,
+      "p50": 1908,
+      "p95": 2065,
+      "max": 2118
+    },
+    {
+      "fromS": 25,
+      "count": 793,
+      "p50": 2288,
+      "p95": 2491,
+      "max": 2568
+    }
+  ],
+  "latencyTrend": {
+    "firstThirdP95": 775,
+    "lastThirdP95": 2278,
+    "growing": true
+  },
+  "convergence": {
+    "clients": 20,
+    "length": 4742,
+    "identicalTexts": true,
+    "identicalStateVectors": true,
+    "persistedMatches": true,
+    "ackedSeqs": 239,
+    "missingAckedSeqs": [],
+    "journalSeq": 239
+  },
+  "ok": false
+}

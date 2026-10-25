@@ -4,6 +4,12 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@editeur/shared": "0.1.0"
+    "@aws-sdk/client-dynamodb": "^3.1156.0",
+    "@aws-sdk/client-s3": "^3.1156.0",
+    "@aws-sdk/client-ssm": "^3.1156.0",
+    "@aws-sdk/lib-dynamodb": "^3.1156.0",
+    "@editeur/shared": "0.1.0",
+    "@hocuspocus/server": "4.7.1",
+    "yjs": "^13.6.33"
   }
 }

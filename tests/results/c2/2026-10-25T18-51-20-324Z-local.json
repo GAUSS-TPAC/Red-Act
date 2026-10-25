@@ -1,0 +1,115 @@
+{
+  "target": "local",
+  "startedAt": "2026-10-25T18:51:20.607Z",
+  "docId": "e34668ac-3c45-412a-b65b-caa033465dc9",
+  "clients": 20,
+  "ratePerClient": 8,
+  "durationS": 60,
+  "sent": 9521,
+  "confirmed": 9521,
+  "refusals": 0,
+  "disconnects": 0,
+  "settleMs": 89,
+  "latencyWindows": [
+    {
+      "fromS": 0,
+      "count": 780,
+      "p50": 98,
+      "p95": 144,
+      "max": 162
+    },
+    {
+      "fromS": 5,
+      "count": 791,
+      "p50": 93,
+      "p95": 138,
+      "max": 151
+    },
+    {
+      "fromS": 10,
+      "count": 789,
+      "p50": 91,
+      "p95": 137,
+      "max": 162
+    },
+    {
+      "fromS": 15,
+      "count": 800,
+      "p50": 91,
+      "p95": 141,
+      "max": 152
+    },
+    {
+      "fromS": 20,
+      "count": 800,
+      "p50": 92,
+      "p95": 135,
+      "max": 145
+    },
+    {
+      "fromS": 25,
+      "count": 785,
+      "p50": 94,
+      "p95": 139,
+      "max": 147
+    },
+    {
+      "fromS": 30,
+      "count": 796,
+      "p50": 91,
+      "p95": 134,
+      "max": 170
+    },
+    {
+      "fromS": 35,
+      "count": 800,
+      "p50": 91,
+      "p95": 133,
+      "max": 149
+    },
+    {
+      "fromS": 40,
+      "count": 789,
+      "p50": 89,
+      "p95": 133,
+      "max": 191
+    },
+    {
+      "fromS": 45,
+      "count": 798,
+      "p50": 90,
+      "p95": 142,
+      "max": 154
+    },
+    {
+      "fromS": 50,
+      "count": 794,
+      "p50": 88,
+      "p95": 133,
+      "max": 151
+    },
+    {
+      "fromS": 55,
+      "count": 799,
+      "p50": 90,
+      "p95": 139,
+      "max": 151
+    }
+  ],
+  "latencyTrend": {
+    "firstThirdP95": 140,
+    "lastThirdP95": 137,
+    "growing": false
+  },
+  "convergence": {
+    "clients": 20,
+    "length": 9521,
+    "identicalTexts": true,
+    "identicalStateVectors": true,
+    "persistedMatches": true,
+    "ackedSeqs": 596,
+    "missingAckedSeqs": [],
+    "journalSeq": 596
+  },
+  "ok": true
+}
