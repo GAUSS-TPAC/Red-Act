@@ -1,0 +1,36 @@
+{
+  "copies": 500,
+  "requests": 1200,
+  "runs": [
+    {
+      "target": "aws",
+      "startedAt": "2026-10-25T16:42:37.722Z",
+      "copies": 500,
+      "requests": 1200,
+      "linkId": "3596c3a5-6573-4c08-862e-8a97fa4f1bcd",
+      "docId": "58595190-2fa1-494e-8976-931ae46ae3c9",
+      "durationMs": 3186,
+      "statuses": {
+        "0": 1199,
+        "202": 1
+      },
+      "reserved": 1,
+      "latencyMs": {
+        "p50": 1388,
+        "p95": 1388,
+        "p99": 1388,
+        "max": 1388
+      },
+      "replay": {
+        "statuses": {
+          "202": 1
+        },
+        "sameUrl": 0,
+        "newTicket": 0
+      },
+      "networkErrors": 1199,
+      "db": null,
+      "ok": false
+    }
+  ]
+}

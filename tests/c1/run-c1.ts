@@ -7,7 +7,7 @@
  * Options : --copies (500), --requests (1200), --runs (3), --base-url (sinon local).
  */
 import { mkdirSync, writeFileSync } from "node:fs";
-import type { AddressInfo } from "node:net";
+import { setDefaultAutoSelectFamilyAttemptTimeout, type AddressInfo } from "node:net";
 import { parseArgs } from "node:util";
 import { createDocumentClient } from "../../packages/api/src/aws.ts";
 import { ensureLocalTables, isLocalDbUp, LOCAL_ENDPOINT } from "../../scripts/local-tables.ts";
@@ -31,8 +31,12 @@ async function main() {
 
   let baseUrls: string[];
   let close = async () => {};
-  const db = remote ? undefined : createDocumentClient(LOCAL_ENDPOINT);
+  // Sur AWS, vérification en base en lecture seule (GetItem + Scan) avec les identifiants du poste.
+  const db = createDocumentClient(remote ? undefined : LOCAL_ENDPOINT);
   if (remote) {
+    // Node essaie chaque adresse (IPv6 puis IPv4) 250 ms par défaut : trop court sur
+    // une liaison lente, toutes les tentatives échouent en ETIMEDOUT.
+    setDefaultAutoSelectFamilyAttemptTimeout(5000);
     baseUrls = [remote];
   } else {
     if (!(await isLocalDbUp())) throw new Error(`DynamoDB Local injoignable (${LOCAL_ENDPOINT}) : npm run local:db`);
@@ -51,8 +55,11 @@ async function main() {
   try {
     for (let i = 0; i < Number(values.runs); i++) {
       const result = await runC1({ baseUrls, copies, requests, target });
-      // Sur AWS, l'état en base se vérifie par le tableau de bord (étape 6) ou en lecture seule.
-      const db_state = db ? await dbState(db, result.linkId) : null;
+      const db_state = await dbState(db, result.linkId).catch((error: unknown) => {
+        if (!remote) throw error;
+        console.warn(`vérification en base impossible (identifiants AWS ?) : ${String(error)}`);
+        return null;
+      });
       const ok =
         result.reserved === copies &&
         (result.statuses["410"] ?? 0) === requests - copies &&

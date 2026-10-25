@@ -1,8 +1,10 @@
 /**
  * Scénario C1 : N visiteurs sans identité cliquent en même temps sur un lien de
  * K exemplaires, répartis sur plusieurs instances API. Utilisable en local
- * (instances en mémoire + DynamoDB Local) comme contre l'URL CloudFront.
+ * (instances en mémoire + DynamoDB Local) comme contre l'URL CloudFront ; vers
+ * une URL https, les clics passent en HTTP/2 multiplexé (voir helpers/h2.ts).
  */
+import { createH2Pool, H2_STREAMS_PER_SESSION, type H2Pool } from "../helpers/h2.ts";
 
 export interface C1Options {
   /** Adresses des instances (ou une seule URL CloudFront). */
@@ -69,8 +71,25 @@ export async function prepareLink(baseUrl: string, copies: number) {
   return { docId: doc.docId as string, linkId: link.linkId as string };
 }
 
-async function shoot(baseUrl: string, linkId: string, ticket?: string): Promise<Shot> {
+async function shoot(baseUrl: string, linkId: string, ticket?: string, h2?: H2Pool): Promise<Shot> {
   const started = performance.now();
+  if (h2) {
+    const response = await h2.request(`/api/links/${linkId}/claim`, {
+      method: "POST",
+      headers: ticket ? { cookie: `ticket=${ticket}` } : {},
+    });
+    const cookie = response.setCookies.find((c) => c.startsWith("ticket="));
+    let url: string | undefined;
+    try {
+      url = (JSON.parse(response.body) as { url?: string }).url;
+    } catch {}
+    return {
+      status: response.status,
+      ms: performance.now() - started,
+      ticket: cookie?.slice("ticket=".length).split(";")[0],
+      url,
+    };
+  }
   const response = await fetch(`${baseUrl}/api/links/${linkId}/claim`, {
     method: "POST",
     headers: ticket ? { cookie: `ticket=${ticket}` } : {},
@@ -94,6 +113,10 @@ const percentile = (sorted: number[], p: number) =>
 export async function runC1(options: C1Options, linkOverride?: { docId: string; linkId: string }): Promise<C1Result> {
   const { baseUrls, copies, requests } = options;
   const { docId, linkId } = linkOverride ?? (await prepareLink(baseUrls[0]!, copies));
+  // Connexions ouvertes avant le top départ : la mesure ne porte que sur les clics.
+  const h2 = baseUrls[0]!.startsWith("https://")
+    ? await createH2Pool(baseUrls[0]!, Math.ceil(requests / H2_STREAMS_PER_SESSION))
+    : undefined;
 
   const startedAt = new Date().toISOString();
   const t0 = performance.now();
@@ -101,7 +124,7 @@ export async function runC1(options: C1Options, linkOverride?: { docId: string; 
   // Toutes les requêtes partent ensemble : aucune n'attend la réponse d'une autre.
   const shots = await Promise.all(
     Array.from({ length: requests }, (_, i) =>
-      shoot(baseUrls[i % baseUrls.length]!, linkId).catch(() => {
+      shoot(baseUrls[i % baseUrls.length]!, linkId, undefined, h2).catch(() => {
         networkErrors++;
         return { status: 0, ms: 0 } as Shot;
       }),
@@ -113,9 +136,10 @@ export async function runC1(options: C1Options, linkOverride?: { docId: string; 
   // Second clic de chaque gagnant, sur une autre instance que la première fois.
   const replays = await Promise.all(
     winners.map((w, i) =>
-      shoot(baseUrls[(i + 1) % baseUrls.length]!, linkId, w.ticket).then((r) => ({ first: w, again: r })),
+      shoot(baseUrls[(i + 1) % baseUrls.length]!, linkId, w.ticket, h2).then((r) => ({ first: w, again: r })),
     ),
   );
+  h2?.close();
 
   const latencies = shots.filter((s) => s.status).map((s) => s.ms).sort((a, b) => a - b);
   return {

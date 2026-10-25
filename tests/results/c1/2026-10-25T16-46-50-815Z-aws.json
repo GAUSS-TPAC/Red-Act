@@ -1,0 +1,111 @@
+{
+  "copies": 500,
+  "requests": 1200,
+  "runs": [
+    {
+      "target": "aws",
+      "startedAt": "2026-10-25T16:46:13.796Z",
+      "copies": 500,
+      "requests": 1200,
+      "linkId": "3e376d48-4c9b-4351-b0f8-6d7f11cd2087",
+      "docId": "4210c3cd-cdb3-4a21-b571-1246e4103588",
+      "durationMs": 5918,
+      "statuses": {
+        "202": 500,
+        "410": 700
+      },
+      "reserved": 500,
+      "latencyMs": {
+        "p50": 4617,
+        "p95": 5728,
+        "p99": 5844,
+        "max": 5912
+      },
+      "replay": {
+        "statuses": {
+          "202": 500
+        },
+        "sameUrl": 0,
+        "newTicket": 0
+      },
+      "networkErrors": 0,
+      "db": {
+        "remaining": 0,
+        "status": "epuise",
+        "activeFlag": null,
+        "reservations": 500
+      },
+      "ok": true
+    },
+    {
+      "target": "aws",
+      "startedAt": "2026-10-25T16:46:27.203Z",
+      "copies": 500,
+      "requests": 1200,
+      "linkId": "e0f50359-51d2-42cc-86b9-79dd40164093",
+      "docId": "743579c8-d337-4e81-939e-8138b2965827",
+      "durationMs": 6954,
+      "statuses": {
+        "202": 500,
+        "410": 700
+      },
+      "reserved": 500,
+      "latencyMs": {
+        "p50": 5977,
+        "p95": 6913,
+        "p99": 6941,
+        "max": 6951
+      },
+      "replay": {
+        "statuses": {
+          "202": 500
+        },
+        "sameUrl": 0,
+        "newTicket": 0
+      },
+      "networkErrors": 0,
+      "db": {
+        "remaining": 0,
+        "status": "epuise",
+        "activeFlag": null,
+        "reservations": 500
+      },
+      "ok": true
+    },
+    {
+      "target": "aws",
+      "startedAt": "2026-10-25T16:46:40.912Z",
+      "copies": 500,
+      "requests": 1200,
+      "linkId": "4c8dbfbc-0371-43d3-9bed-ee14790632ab",
+      "docId": "44dd69d4-ef55-49db-9c66-2c084d4d8bdc",
+      "durationMs": 7083,
+      "statuses": {
+        "202": 500,
+        "410": 700
+      },
+      "reserved": 500,
+      "latencyMs": {
+        "p50": 6390,
+        "p95": 7051,
+        "p99": 7074,
+        "max": 7081
+      },
+      "replay": {
+        "statuses": {
+          "202": 500
+        },
+        "sameUrl": 0,
+        "newTicket": 0
+      },
+      "networkErrors": 0,
+      "db": {
+        "remaining": 0,
+        "status": "epuise",
+        "activeFlag": null,
+        "reservations": 500
+      },
+      "ok": true
+    }
+  ]
+}
