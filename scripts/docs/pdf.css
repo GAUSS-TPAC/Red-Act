@@ -1,0 +1,58 @@
+/* Mise en page des PDF des livrables (pandoc → HTML → impression Chrome).
+   Couleurs de l'ENSPY ; l'en-tête (logo, titre du document) et le pied de page sont
+   ajoutés par scripts/docs/pdf.sh dans un bloc <style> propre à chaque document. */
+@page { size: A4; margin: 22mm 16mm 20mm 16mm; }
+
+:root { --orange: #f28c1b; --orange-fonce: #b85c00; --bord: #e5d3bf; --fond: #fbf6f0; --texte: #1d1d1d; }
+html { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 10.5pt; color: var(--texte); }
+body { margin: 0; line-height: 1.45; }
+
+/* Page de garde */
+.couverture { height: 247mm; display: flex; flex-direction: column; align-items: center; text-align: center; break-after: page; page-break-after: always; }
+.couverture .logo { width: 46mm; margin-top: 6mm; }
+.couverture .ecole { margin-top: 5mm; font-size: 12.5pt; font-weight: bold; color: var(--orange-fonce); letter-spacing: .02em; }
+.couverture .ecole span { display: block; margin-top: 1.5mm; font-size: 10.5pt; font-weight: normal; color: #555; }
+.couverture .bandeau { margin-top: auto; width: 100%; padding: 12mm 10mm; border-top: 3px solid var(--orange); border-bottom: 3px solid var(--orange); background: var(--fond); }
+.couverture .projet { font-size: 11pt; color: #555; text-transform: uppercase; letter-spacing: .08em; }
+.couverture .titre { font-size: 28pt; color: var(--orange-fonce); margin: 5mm 0 4mm; border: 0; padding: 0; line-height: 1.15; }
+.couverture .sous-titre { font-size: 13pt; color: #333; margin: 0; }
+.couverture .meta { margin-top: auto; margin-bottom: 4mm; font-size: 10.5pt; color: #444; line-height: 1.7; }
+.couverture .meta strong { color: var(--texte); }
+
+/* Sommaire */
+nav#TOC { break-after: page; page-break-after: always; }
+nav#TOC::before { content: "Sommaire"; display: block; font-size: 17pt; font-weight: bold; color: var(--orange-fonce); border-bottom: 2px solid var(--orange); padding-bottom: 2mm; margin-bottom: 5mm; }
+nav#TOC ul { list-style: none; padding-left: 0; }
+nav#TOC > ul > li { margin: 2.2mm 0; font-weight: bold; }
+nav#TOC ul ul { padding-left: 7mm; font-weight: normal; }
+nav#TOC ul ul li { margin: 1mm 0; }
+nav#TOC a { color: var(--texte); text-decoration: none; }
+
+h1, h2 { color: var(--orange-fonce); }
+h1 { font-size: 18pt; border-bottom: 2px solid var(--orange); padding-bottom: 2mm; margin-top: 0; }
+h2 { font-size: 14pt; margin-top: 9mm; padding: 1.5mm 0 1.5mm 3mm; border-left: 4px solid var(--orange); background: var(--fond); break-after: avoid; }
+h3 { font-size: 11.5pt; margin-top: 6mm; color: #5a3200; break-after: avoid; }
+h4 { font-size: 10.5pt; break-after: avoid; }
+p, li { orphans: 3; widows: 3; }
+a { color: var(--orange-fonce); }
+strong { color: #111; }
+
+table { border-collapse: collapse; width: 100%; margin: 3mm 0 4mm; font-size: 9pt; break-inside: auto; }
+thead { display: table-header-group; }
+tr { break-inside: avoid; }
+th, td { border: 1px solid var(--bord); padding: 1.6mm 2mm; vertical-align: top; text-align: left; }
+th { background: var(--orange); color: #fff; font-weight: bold; }
+th code { background: rgba(255,255,255,.25); color: #fff; }
+tbody tr:nth-child(even) td { background: var(--fond); }
+td code, th code { font-size: 8.2pt; overflow-wrap: anywhere; }
+
+code { font-family: "DejaVu Sans Mono", Menlo, Consolas, monospace; font-size: 8.8pt; background: #f4ece3; padding: 0 1mm; border-radius: 2px; }
+pre { background: #fdfaf6; border: 1px solid var(--bord); border-left: 3px solid var(--orange); border-radius: 3px; padding: 3mm; font-size: 8.3pt; line-height: 1.35; white-space: pre-wrap; word-break: break-word; break-inside: avoid; }
+pre code { background: none; padding: 0; font-size: inherit; }
+blockquote { border-left: 3px solid var(--orange); margin: 3mm 0; padding: 1mm 4mm; color: #444; background: var(--fond); }
+
+figure { margin: 4mm 0 2mm; text-align: center; break-inside: avoid; }
+figure img { max-width: 100%; max-height: 220mm; object-fit: contain; border: 1px solid var(--bord); padding: 2mm; box-sizing: border-box; }
+figcaption { display: none; } /* la légende est écrite en italique sous l'image dans le Markdown */
+figure + p > em:only-child { display: block; text-align: center; color: var(--orange-fonce); font-size: 9.5pt; }
+p > img { max-width: 100%; }

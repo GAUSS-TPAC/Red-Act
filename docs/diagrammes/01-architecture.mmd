@@ -1,0 +1,52 @@
+%% Architecture de bout en bout (région eu-north-1, sauf CloudFront qui est global)
+flowchart TB
+  subgraph Utilisateurs[" "]
+    direction LR
+    R["Rédacteurs<br/>navigateur : Quill 2 + Yjs"]
+    V["Visiteurs anonymes<br/>page de téléchargement"]
+    A["Association<br/>tableau de bord /admin"]
+  end
+
+  CF["Amazon CloudFront — https://xxxx.cloudfront.net<br/>/assets/* en cache · le reste sans cache<br/>transmet CloudFront-Viewer-Address, WebSocket, cookies"]
+
+  R -- "HTTPS + WebSocket" --> CF
+  V -- HTTPS --> CF
+  A -- HTTPS --> CF
+
+  subgraph Region["Région eu-north-1 — VPC sur 2 zones, sous-réseaux publics, sans NAT Gateway"]
+    ALB["Application Load Balancer<br/>n'accepte que CloudFront · /internal* → 403"]
+
+    RTI["Serveur temps réel<br/>1 × t3.small (ASG min = max = 1)<br/>Hocuspocus 4.7.1 + Yjs<br/>group commit · crédit · refus<br/>compaction · versions · worker PDF"]
+    API1["API sans état + front statique<br/>1 à 4 × t3.micro (ASG, 2 zones)<br/>Fastify 5 · sessions · documents<br/>liens · clic · anti-abus · admin"]
+
+    SQS[["SQS<br/>editeur-pdf-requests"]]
+    DDB[("DynamoDB<br/>8 tables à la demande")]
+    S3[("S3 privé, versionné<br/>snapshots/ · pdf/")]
+    SES["SES<br/>e-mail du dernier exemplaire"]
+    ASGAPI["Auto Scaling<br/>montée programmée"]
+    COMMUN["Pour chaque instance :<br/>rôle IAM dédié · secrets SSM SecureString<br/>journaux CloudWatch Logs (7 jours)"]
+  end
+
+  CF --> ALB
+  ALB -- "/collab* (WebSocket)" --> RTI
+  ALB -- "/api/*, /, /assets/*" --> API1
+
+  API1 -- "{docId, seqRequis}" --> SQS
+  SQS -- "long polling" --> RTI
+  RTI -- "journal + seq + crédit<br/>(une transaction)" --> DDB
+  API1 -- "décrément conditionnel<br/>réservations" --> DDB
+  RTI -- "instantanés, PDF" --> S3
+  API1 -- "signe les URL de téléchargement (60 s)" --> S3
+  API1 --> SES
+  API1 --> ASGAPI
+  V -. "GET du PDF (URL pré-signée)" .-> S3
+
+  classDef aws fill:#fff3e0,stroke:#e08a00,color:#222;
+  classDef calc fill:#e8f1fb,stroke:#2f6db5,color:#222,font-weight:bold;
+  classDef user fill:#eef7ee,stroke:#3a8a3a,color:#222;
+  classDef note fill:#f5f5f5,stroke:#999,color:#333,stroke-dasharray: 4 3;
+  class CF,ALB,DDB,S3,SQS,SES,ASGAPI aws;
+  class RTI,API1 calc;
+  class R,V,A user;
+  class COMMUN note;
+  style Utilisateurs fill:none,stroke:none;

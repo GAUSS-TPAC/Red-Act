@@ -1,0 +1,16 @@
+%% Le pic : lien de 5 000 exemplaires ouvert à 18:00, 15 000 visiteurs
+gantt
+  title Pic autour d'opensAt (exemple : ouverture à 18:00)
+  dateFormat HH:mm
+  axisFormat %H:%M
+  section API (ASG)
+  1 instance (repos)                         :done, a0, 17:30, 17:50
+  Montée programmée à 4 instances (opensAt − 10 min) :crit, a1, 17:50, 18:15
+  Retour au minimum (opensAt + 15 min)       :a2, 18:15, 18:30
+  section Visiteurs
+  Arrivées anticipées : 425 + Retry-After    :v0, 17:52, 18:00
+  80 % des 15 000 visiteurs (≈ 200 req/s)    :crit, v1, 18:00, 18:01
+  Les 20 % restants                          :v2, 18:01, 18:10
+  410 servis depuis la mémoire               :v3, 18:01, 18:12
+  section Rédacteurs
+  300 rédacteurs écrivent en continu         :w0, 17:45, 18:20

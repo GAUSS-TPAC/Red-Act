@@ -17,7 +17,7 @@ la facturation AWS, (4) la façon de la vérifier.
 | Un seul serveur temps réel t3.small, API en t3.micro (niveau gratuit), 1 instance API hors pic | — |
 | Montée à 4 instances API **seulement** autour d'un `opensAt` (actions programmées), retour à 1 après 15 min | ≈ 3 instances × 25 min par pic au lieu de 24 h/24 |
 | DynamoDB à la demande : rien au repos ; group commit (une transaction par document au plus toutes les 100 ms, quel que soit le nombre de rédacteurs) | écritures divisées par le nombre de frappes regroupées |
-| 410 servi depuis la mémoire de l'instance (C6) : aucune lecture DynamoDB pour les ≈ 10 000 visiteurs refusés d'un pic | — |
+| 410 servi depuis la mémoire de l'instance (annonce de l'épuisement) : aucune lecture DynamoDB pour les ≈ 10 000 visiteurs refusés d'un pic | — |
 | PDF supprimés après 1 jour, versions S3 non courantes après 30 jours, journal DynamoDB expiré après 7 jours (TTL), journaux CloudWatch gardés 7 jours | stockage borné |
 | CloudFront avec son certificat par défaut : ni domaine ni ACM | ≈ 12 $/an |
 | Instance de test de charge créée pour le test puis détruite (`EditeurPartageCharge`) | payée à l'heure d'usage seulement |

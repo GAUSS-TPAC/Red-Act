@@ -1,0 +1,14 @@
+%% Connexion de l'éditeur et refus (CLAUDE.md §5)
+stateDiagram-v2
+  [*] --> Connexion
+  Connexion --> Connecte : jeton valide et éditeur du document
+  Connexion --> AccesRefuse : jeton invalide ou pas éditeur
+  Connecte --> Connecte : frappe → ack {seq}
+  Connecte --> Hors_ligne : réseau coupé ou serveur relancé
+  Hors_ligne --> Connexion : reconnexion automatique<br/>(les modifications non confirmées repartent)
+  Connecte --> LectureSeule : refus 4001 crédit épuisé<br/>Y.Doc détruit puis recréé
+  LectureSeule --> Connecte : minuit UTC (nouveau crédit)
+  Connecte --> Bloque : refus 4003 (5 refus en 1 min)<br/>Y.Doc détruit, aucune reconnexion
+  Bloque --> Connexion : fin du blocage (5 h)
+  Connecte --> Connexion : refus 4400 contenu invalide ou 4500 erreur serveur<br/>Y.Doc détruit puis recréé
+  AccesRefuse --> [*]

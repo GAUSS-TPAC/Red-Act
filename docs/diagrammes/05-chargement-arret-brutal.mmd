@@ -1,0 +1,32 @@
+%% Chargement, compaction et reprise après un arrêt brutal du serveur temps réel
+sequenceDiagram
+  autonumber
+  participant C as Rédacteurs (20 clients)
+  participant RT1 as Serveur temps réel (instance 1)
+  participant ASG as Auto Scaling (min = max = 1)
+  participant RT2 as Serveur temps réel (instance 2)
+  participant D as DynamoDB
+  participant S as S3
+
+  C->>RT1: updates
+  RT1->>D: journal seq 601, 602 (écrits)
+  RT1-->>C: ack 601, ack 602
+  C->>RT1: updates en vol (pas encore écrits)
+  Note over RT1: arrêt brutal (noyau redémarré, Node tué net)<br/>les updates en vol ne sont pas confirmés
+  RT1--xC: connexions coupées
+
+  ASG->>RT2: relance une instance
+  C->>RT2: reconnexion (essais répétés)
+  RT2->>D: lecture du document (snapshotSeq, seq = 602)
+  RT2->>S: dernier instantané snapshots/{doc}/{snapshotSeq}.bin
+  RT2->>D: journal seq > snapshotSeq jusqu'à 602 (lecture fortement cohérente)
+  Note over RT2: un trou dans le journal ⇒ chargement refusé<br/>(jamais un état incomplet)
+  RT2-->>C: état du document à seq 602
+  C->>RT2: synchronisation : renvoi de tout ce qui n'était pas confirmé
+  RT2->>D: journal seq 603 (renvois, doublons ignorés par Yjs)
+  RT2-->>C: ack 603, diffusion
+
+  Note over RT2,S: Compaction (500 éléments ou 5 min d'activité, et au déchargement)
+  RT2->>S: état fusionné → snapshots/{doc}/{seq}.bin
+  RT2->>D: snapshotSeq avancé (écriture conditionnelle)
+  Note over D: les anciens éléments du journal expirent par TTL (7 jours)

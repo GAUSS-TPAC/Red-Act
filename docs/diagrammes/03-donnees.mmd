@@ -1,0 +1,79 @@
+%% Modèle de données DynamoDB (8 tables, mode à la demande) ; objets S3 : snapshots/{doc}/{seq}.bin et pdf/{doc}/{seq}.pdf
+erDiagram
+  DOCUMENTS ||--o{ JOURNAL : "modifications acceptées (seq)"
+  DOCUMENTS ||--o{ VERSIONS : "instantanés datés ou nommés"
+  DOCUMENTS ||--o{ LINKS : "liens de téléchargement (un seul actif)"
+  LINKS ||--o{ RESERVATIONS : "un exemplaire réservé = une réservation"
+  DOCUMENTS ||--o| PRESENCE : "battement du serveur temps réel"
+  CREDITS }o--|| REDACTEUR : "un élément par jour UTC"
+  BLOCKS }o--o| REDACTEUR : "blocage 5 h"
+
+  DOCUMENTS {
+    string docId PK
+    string title
+    string ownerEmail
+    set editors "e-mails des éditeurs"
+    number seq "dernière séquence acceptée"
+    number pdfSeq "séquence du dernier PDF complet"
+    number snapshotSeq "séquence du dernier instantané"
+    string snapshotKey
+    string activeLinkId "lien actif (au plus un)"
+  }
+  JOURNAL {
+    string docId PK
+    number seq PK "clé de tri"
+    binary update "updates Yjs fusionnés"
+    list authors
+    number createdAt
+    number ttl "7 jours"
+  }
+  CREDITS {
+    string email_jour PK "attribut pk = email#AAAA-MM-JJ"
+    number used "caractères insérés, max 10000"
+    number ttl "2 jours"
+  }
+  LINKS {
+    string linkId PK
+    string docId
+    string creatorEmail
+    number max
+    number remaining "décrément conditionnel remaining > 0"
+    number opensAt "optionnel"
+    string status "actif, epuise, ferme"
+    string activeFlag "index creux liens-actifs"
+    number closedRemaining
+  }
+  RESERVATIONS {
+    string reservationId PK
+    string linkId
+    string docId
+    number seqRequis "seq du document au clic"
+    string url "URL pré-signée en cours"
+    number urlExpiresAt
+    string pdfKey "PDF figé à la première URL"
+    number ttl "1 heure"
+  }
+  BLOCKS {
+    string subject PK "writer#email ou ip#adresse"
+    string reason
+    number expireLe
+    number ttl
+  }
+  PRESENCE {
+    string docId PK
+    string title
+    number connected
+    number lastBeat
+    number ttl "2 minutes"
+  }
+  VERSIONS {
+    string docId PK
+    number createdAt PK "clé de tri"
+    string snapshotKey
+    number seq
+    string label
+    string author
+  }
+  REDACTEUR {
+    string email "identité déclarative (nom + e-mail)"
+  }

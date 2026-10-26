@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Éditeur de documents partagé — API
-  version: 0.7.0
+  version: 0.8.0
   description: |
     API HTTP de l'éditeur partagé. Toutes les routes sont servies derrière CloudFront
     (`https://<distribution>.cloudfront.net`), en HTTPS uniquement.
@@ -14,14 +14,20 @@ info:
     identité. Un visiteur qui obtient un exemplaire reçoit un cookie `ticket` (signé, 2 min)
     qui lui permet de revenir chercher **le même** exemplaire sans en consommer un autre.
 
-    **Garantie C1.** Un lien créé avec `max = K` donne exactement K réponses 200 ou 202
+    **Garantie : nombre exact de téléchargements.** Un lien créé avec `max = K` donne exactement K réponses 200 ou 202
     porteuses d'un nouveau ticket, quel que soit le nombre de clics simultanés ; toutes les
     autres réponses aux clics sans ticket sont 410 (une fois le stock épuisé).
 
     **Mise en cache.** Les réponses du clic portent toujours `Cache-Control: no-store`.
 
-    **Statut de ce document.** Couvre les routes HTTP des étapes 1 à 6 ; le protocole temps
-    réel (WebSocket `/collab`, Hocuspocus) est décrit dans le dossier de conception.
+    **Portée.** Ce fichier décrit toutes les routes HTTP. Le protocole temps réel
+    (WebSocket `/collab` : connexion, contenu autorisé, confirmations `ack`, refus 4001,
+    4003, 4400 et 4500, versions, exemple de client) est décrit dans
+    [`docs/api-temps-reel.md`](api-temps-reel.md).
+
+    **Parcours type pour un test.** `POST /api/session` → `POST /api/documents` →
+    écrire par `/collab` → `POST /api/documents/{docId}/links` → `POST /api/links/{linkId}/claim`
+    (en rejouant le cookie `ticket` reçu jusqu'à obtenir 200).
 servers:
   - url: https://{distribution}.cloudfront.net
     variables:
@@ -247,7 +253,7 @@ paths:
     get:
       tags: [session]
       summary: Crédit d'écriture du jour (affichage)
-      description: Jour UTC. La garantie C4 est assurée par le serveur temps réel, pas par cette route.
+      description: Jour UTC. La garantie du crédit quotidien est assurée par le serveur temps réel, pas par cette route.
       security: [{ session: [] }]
       responses:
         "200":
@@ -341,7 +347,7 @@ paths:
       summary: Créer un lien de téléchargement
       description: |
         Réservé aux éditeurs du document. Le lien donne toujours le document **tel qu'il
-        est au moment du clic** (C3), jamais tel qu'il était à la création du lien.
+        est au moment du clic**, jamais tel qu'il était à la création du lien.
         `opensAt` (optionnel) : avant cette heure, le clic répond 425.
         Le PDF de l'état actuel est préparé dès la création : si personne n'écrit
         d'ici les premiers clics, ils reçoivent directement 200.
@@ -454,7 +460,7 @@ paths:
         PDF. Deux retours simultanés obtiennent la même nouvelle URL. Le détenteur d'un ticket
         valide est servi même après l'épuisement du lien.
 
-        **Contenu du PDF (C3).** Le PDF délivré contient au moins toutes les modifications
+        **Contenu du PDF (à jour au moment du clic).** Le PDF délivré contient au moins toutes les modifications
         acceptées avant le clic : le clic fixe `seqRequis` (séquence du document, lue de façon
         fortement cohérente) et l'URL n'est donnée que lorsqu'un PDF de séquence ≥ `seqRequis`
         est entièrement écrit. Ce PDF est un état cohérent du document (journal rejoué jusqu'à

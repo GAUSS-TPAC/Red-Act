@@ -1,0 +1,14 @@
+%% Page de téléchargement côté visiteur : toujours une réponse
+stateDiagram-v2
+  [*] --> Demande : ouverture de la page
+  Demande --> Telecharge : 200 (url)
+  Demande --> Patiente : 202 réservé, PDF en préparation
+  Demande --> Patiente : 425 pas encore ouvert (affiche opensAt)
+  Demande --> Patiente : 429 adresse bloquée (affiche la fin)
+  Demande --> Patiente : 5xx ou réseau (délai croissant + aléa)
+  Demande --> Epuise : 410
+  Demande --> Inconnu : 404
+  Patiente --> Demande : après Retry-After
+  Telecharge --> [*] : le PDF s'ouvre
+  Epuise --> [*] : plus aucune requête
+  Inconnu --> [*]

@@ -12,8 +12,10 @@ d'un lien à son dernier téléchargement.
 | Infrastructure | `infra/` (AWS CDK v2, TypeScript) |
 | Tests | `tests/`, `packages/*/test`, `infra/test` ; résultats bruts dans `tests/results/` |
 | Dossier de conception | [`docs/dossier-conception.md`](docs/dossier-conception.md) |
-| Rapport de test (preuves C1 et C2) | [`docs/rapport-test.md`](docs/rapport-test.md) |
-| Description de l'API | [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3) |
+| Rapport de test (preuves des deux exigences éliminatoires) | [`docs/rapport-test.md`](docs/rapport-test.md) |
+| Description de l'API | [`docs/openapi.yaml`](docs/openapi.yaml) (HTTP, OpenAPI 3) et [`docs/api-temps-reel.md`](docs/api-temps-reel.md) (WebSocket `/collab`) |
+| Diagrammes | [`docs/diagrammes/`](docs/diagrammes/) (sources Mermaid `.mmd` et images `.png`) |
+| Versions PDF des documents | [`docs/pdf/`](docs/pdf/) |
 | Preuve de coût | [`docs/cout.md`](docs/cout.md) |
 
 ## Architecture en bref
@@ -69,25 +71,25 @@ secondes de reconnexion, rien d'accepté n'est perdu).
 ```bash
 npm ci
 npm run local:db            # DynamoDB Local (Docker) sur le port 8000
-npm test                    # compilation + tous les tests (unitaires, intégration, C1, C2, C3, C4, CDK)
+npm test                    # compilation + tous les tests (unitaires, intégration, scénarios, CDK)
 npm run dev                 # application complète sur http://localhost:3000 (admin : jeton « admin-local »)
 ```
 
 Scripts de mesure (résultats bruts horodatés dans `tests/results/`) :
 
-| Contrainte | Local | Sur AWS |
+| Exigence | Local | Sur AWS |
 |---|---|---|
-| C1 — exactement N téléchargements | `npm run test:c1` | `npm run test:c1 -- --base-url <URL>` ¹ |
-| C2 — aucune modification perdue, convergence | `npm run test:c2` | `npm run test:c2 -- --base-url <URL> --bucket <BucketName> [--flush-delay 200]` |
-| C3 — PDF à l'état du clic | `npm run test:c3` | `npm run test:c3 -- --base-url <URL>` |
-| C4 — crédit multi-appareils | (Vitest, `tests/c2/c2.test.ts`) | `npm run test:c4 -- --base-url <URL> --bucket <BucketName>` |
+| Nombre exact de téléchargements | `npm run test:c1` | `npm run test:c1 -- --base-url <URL>` ¹ |
+| Aucune modification perdue, convergence | `npm run test:c2` | `npm run test:c2 -- --base-url <URL> --bucket <BucketName> [--flush-delay 200]` |
+| PDF à jour au moment du clic | `npm run test:c3` | `npm run test:c3 -- --base-url <URL>` |
+| Crédit quotidien, plusieurs appareils | (Vitest, `tests/c2/c2.test.ts`) | `npm run test:c4 -- --base-url <URL> --bucket <BucketName>` |
 
-¹ Depuis l'anti-abus (étape 6), 1 000 clics depuis un même poste sont bloqués (429) au-delà
-de 30/N requêtes en 10 s : lancer C1 depuis l'instance de test de charge (adresse exemptée).
+¹ À cause de l'anti-abus, 1 000 clics depuis un même poste sont bloqués (429) au-delà
+de 30/N requêtes en 10 s : lancer ce test depuis l'instance de test de charge (adresse exemptée).
 
 `<BucketName>` : sortie `BucketName` de la stack (`aws cloudformation describe-stacks --region eu-north-1 --stack-name EditeurPartage --query "Stacks[0].Outputs"`).
 
-**Variante « arrêt brutal » de C2** : pendant `npm run test:c2 -- --base-url … --bucket … --duration 120`,
+**Variante « arrêt brutal » du test d'écriture** : pendant `npm run test:c2 -- --base-url … --bucket … --duration 120`,
 terminer l'instance temps réel :
 
 ```bash
@@ -99,7 +101,7 @@ aws ec2 terminate-instances --region eu-north-1 --instance-ids "$ID"
 L'ASG relance une instance ; les clients se reconnectent et renvoient ce qui n'avait pas
 été confirmé ; le script vérifie que chaque séquence confirmée est dans l'état final.
 
-### Test de charge (C5, C6)
+### Test de charge (pic d'affluence, annonce de l'épuisement)
 
 ```bash
 npm run build

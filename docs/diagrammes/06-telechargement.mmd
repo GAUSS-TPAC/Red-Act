@@ -1,0 +1,48 @@
+%% Clic sur un lien : POST /api/links/{linkId}/claim
+sequenceDiagram
+  autonumber
+  participant V as Visiteur
+  participant API as Instance API
+  participant D as DynamoDB
+  participant Q as SQS pdf-requests
+  participant RT as Serveur temps réel (worker PDF)
+  participant S as S3
+  participant E as SES
+
+  V->>API: POST /claim (sans ticket)
+  alt lien connu épuisé par cette instance (mémoire)
+    API-->>V: 410 épuisé, sans aucun accès à DynamoDB
+  else lien pas encore ouvert
+    API-->>V: 425 + opensAt + Retry-After (5 à 62 s)
+  else
+    API->>D: lecture fortement cohérente de seq du document = seqRequis
+    API->>D: UpdateItem remaining = remaining − 1<br/>condition remaining > 0 et ouverture passée
+    alt échec conditionnel (stock nul)
+      D-->>API: ConditionalCheckFailed
+      API->>API: mémorise « épuisé »
+      API-->>V: 410 épuisé
+    else succès (remaining renvoyé)
+      API->>D: Put réservation {reservationId, linkId, docId, seqRequis}
+      opt remaining = 0 (décrément unique)
+        API->>D: lien marqué épuisé
+        API->>E: e-mail au créateur du lien (une seule fois)
+      end
+      alt pdfSeq ≥ seqRequis
+        API->>API: signe une URL S3 du PDF (60 s, calcul local)
+        API-->>V: 200 + url + cookie ticket (2 min)
+      else PDF pas encore à jour
+        API->>Q: {docId, seqRequis}
+        API-->>V: 202 patienter + Retry-After + cookie ticket
+        Q->>RT: long polling
+        RT->>RT: copie synchrone de l'état à seq S ≥ seqRequis,<br/>rendu pdfkit dans un worker thread
+        RT->>S: pdf/{doc}/{S}.pdf (écrit en entier)
+        RT->>D: pdfSeq = S (condition pdfSeq < S)
+        V->>API: POST /claim (avec ticket)
+        API->>D: relit la réservation (aucun exemplaire consommé)
+        API->>API: signe une URL du même PDF (pdfKey figé)
+        API-->>V: 200 + url
+      end
+    end
+  end
+  V->>S: GET du PDF (URL pré-signée)
+  Note over V,API: toutes les réponses : Cache-Control no-store<br/>le client arrête d'interroger dès le 410

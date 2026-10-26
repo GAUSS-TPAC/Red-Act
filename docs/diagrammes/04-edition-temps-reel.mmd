@@ -1,0 +1,39 @@
+%% Écriture à plusieurs : rien n'est diffusé ni confirmé avant l'écriture DynamoDB
+sequenceDiagram
+  autonumber
+  participant A as Rédactrice A (navigateur)
+  participant B as Rédacteur B (navigateur)
+  participant RT as Serveur temps réel (Hocuspocus)
+  participant D as DynamoDB
+
+  A->>RT: connexion wss /collab, name = docId, token = jeton de session
+  RT->>D: lecture du document (éditeurs), blocage éventuel
+  RT-->>A: authentifiée + état du document (synchronisation Yjs)
+
+  Note over A: frappes regroupées toutes les 200 ms
+  A->>RT: update Yjs (insertions de A)
+  B->>RT: update Yjs (insertions de B, au même endroit)
+  Note over RT: beforeSync retient chaque update<br/>tant que son écriture n'est pas finie
+
+  RT->>RT: lot du document : updates fusionnés (Y.mergeUpdates)<br/>caractères insérés comptés par rédacteur
+  RT->>D: TransactWriteItems<br/>Put journal {docId, seq+1} (absent)<br/>Update document seq = seq+1 (si seq attendu)<br/>Update crédit A et B : used += n si used + n ≤ 10 000
+
+  alt transaction réussie
+    D-->>RT: OK
+    RT->>RT: application à la copie de référence
+    RT-->>B: diffusion de l'update de A
+    RT-->>A: diffusion de l'update de B
+    RT-->>A: ack {seq} (modification acceptée)
+    RT-->>B: ack {seq}
+  else crédit de B dépassé (CancellationReasons)
+    D-->>RT: échec conditionnel sur le crédit de B
+    RT->>D: nouvelle transaction sans les updates de B
+    RT-->>A: ack {seq}
+    RT-->>B: refus {code 4001} puis fermeture de la connexion au document
+    Note over B: détruit son Y.Doc, en recrée un neuf,<br/>se reconnecte en lecture seule jusqu'à minuit UTC
+  else TransactionConflict (même crédit débité ailleurs)
+    D-->>RT: conflit
+    RT->>D: nouvel essai après un délai aléatoire court, sans rien refuser
+  end
+
+  Note over RT,D: une seule transaction à la fois par document,<br/>au moins 100 ms entre deux débuts

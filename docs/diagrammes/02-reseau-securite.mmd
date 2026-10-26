@@ -1,0 +1,39 @@
+%% Réseau et sécurité : qui peut parler à qui
+flowchart TB
+  Internet(("Internet"))
+  CF["CloudFront<br/>HTTPS, certificat *.cloudfront.net"]
+  Internet -- "443" --> CF
+
+  subgraph VPC["VPC — 2 zones de disponibilité, sous-réseaux publics, aucune NAT Gateway"]
+    ALB["ALB — groupe de sécurité :<br/>port 80 depuis la liste de préfixes gérée CloudFront seulement"]
+    subgraph AZA["Zone a"]
+      APIa["API t3.micro"]
+    end
+    subgraph AZB["Zone b"]
+      APIb["API t3.micro"]
+    end
+    RT["Temps réel t3.small<br/>(une instance, dans l'une des 2 zones)"]
+    EPS3["Point de terminaison gateway S3 (gratuit)"]
+    EPDDB["Point de terminaison gateway DynamoDB (gratuit)"]
+  end
+
+  CF -- "80" --> ALB
+  ALB -- "3000 — le SG API n'accepte que le SG de l'ALB" --> APIa
+  ALB -- "3000" --> APIb
+  ALB -- "1234 — le SG temps réel n'accepte que le SG de l'ALB" --> RT
+  APIa --> EPS3
+  APIa --> EPDDB
+  APIb --> EPDDB
+  RT --> EPS3
+  RT --> EPDDB
+
+  SSMSM["SSM Session Manager<br/>administration sans port 22"]
+  SSMSM -.-> RT
+  SSMSM -.-> APIa
+
+  IAM["Chaque composant a son rôle IAM : actions et ressources exactes<br/>seule exception : autoscaling:DescribeAutoScalingGroups en Resource *"]
+
+  classDef sg fill:#fdecea,stroke:#c0392b,color:#222;
+  classDef note fill:#f5f5f5,stroke:#999,color:#333,stroke-dasharray: 4 3;
+  class ALB sg;
+  class IAM note;

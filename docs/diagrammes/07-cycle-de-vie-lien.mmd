@@ -1,0 +1,31 @@
+%% Cycle de vie d'un lien de téléchargement
+stateDiagram-v2
+  [*] --> PasOuvert : création avec opensAt futur<br/>(actions programmées, 4 instances à opensAt − 10 min)
+  [*] --> Actif : création sans opensAt
+  PasOuvert --> Actif : opensAt atteint
+  PasOuvert --> Ferme : fermé par un rédacteur<br/>(montée programmée retirée)
+
+  state Actif {
+    [*] --> Disponible
+    Disponible --> Disponible : clic gagnant<br/>remaining − 1, réservation
+  }
+
+  Actif --> Epuise : le décrément fait passer remaining à 0<br/>(e-mail SES au créateur, une seule fois)
+  Actif --> Ferme : fermé par un rédacteur<br/>remaining → 0, closedRemaining = reste
+
+  Epuise --> [*]
+  Ferme --> [*]
+
+  note right of PasOuvert
+    clic → 425 + Retry-After
+  end note
+  note right of Epuise
+    clic → 410 (mémoire de l'instance)
+    ticket valide → son exemplaire
+  end note
+  note right of Ferme
+    clic → 410
+    réservation en attente → honorée
+    exemplaire déjà remis → 410
+    le document peut recevoir un nouveau lien
+  end note

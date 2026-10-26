@@ -2,9 +2,25 @@
 
 Projet évalué AWS : application web d'écriture à plusieurs pour le journal d'une
 association étudiante. Ce dossier décrit l'architecture, les choix et leurs
-justifications, contrainte par contrainte, puis les limites assumées. Les preuves
+justifications, exigence par exigence, puis les limites assumées. Les preuves
 chiffrées sont dans le [rapport de test](rapport-test.md), l'API dans
-[openapi.yaml](openapi.yaml), le coût dans [cout.md](cout.md).
+[openapi.yaml](openapi.yaml) (HTTP) et [api-temps-reel.md](api-temps-reel.md) (WebSocket),
+le coût dans [cout.md](cout.md). Les diagrammes sont dans [`diagrammes/`](diagrammes/)
+(sources Mermaid `.mmd`, modifiables, et images `.png`).
+
+| Figure | Sujet | Section |
+|---|---|---|
+| 1 | Architecture de bout en bout | §2 |
+| 2 | Réseau et sécurité | §2 |
+| 3 | Déploiement | §2 |
+| 4 | Modèle de données | §3 |
+| 5 | Écriture à plusieurs (group commit) | §5.3 |
+| 6 | États de l'éditeur et refus | §5.4 |
+| 7 | Chargement, compaction, arrêt brutal | §5.5 |
+| 8 | Clic sur un lien et génération du PDF | §6.1 |
+| 9 | Cycle de vie d'un lien | §6.1 |
+| 10 | Le pic autour de l'heure d'ouverture | §7.1 |
+| 11 | Page de téléchargement côté visiteur | §7.2 |
 
 ## 1. Le besoin et les contraintes
 
@@ -17,52 +33,43 @@ qui s'acharnent ; tableau de bord de l'association ; e-mail au créateur d'un li
 dernier téléchargement. Identité : un nom et une adresse e-mail saisis à l'entrée (pas de
 vrais comptes) ; visiteurs anonymes.
 
-| | Contrainte | Où elle est tenue |
+Le sujet impose six exigences, rappelées ci-dessous dans l'ordre de l'énoncé ; les deux
+premières sont éliminatoires. Dans la suite, chacune est désignée par son nom.
+
+| Exigence | Ce que demande le sujet | Où elle est tenue |
 |---|---|---|
-| C1 | Un lien autorise exactement N téléchargements, jamais un de plus | §6.1 : décrément atomique conditionnel DynamoDB |
-| C2 | Aucune modification acceptée n'est perdue ; tous convergent | §5 : CRDT Yjs + écriture DynamoDB **avant** diffusion |
-| C3 | Un lien utilisé à T1 donne le document tel qu'à T1 | §6.2 : `seq` lu au clic, PDF à `pdfSeq ≥ seqRequis` |
-| C4 | Jamais plus que le crédit du jour, même depuis plusieurs appareils | §5.4 : débit conditionnel dans la même transaction que le journal |
-| C5 | 15 000 visiteurs (80 % en 1 min) pendant que 300 rédacteurs écrivent | §7 : API sans état + montée programmée, 410 en mémoire |
-| C6 | Après le dernier exemplaire, les visiteurs l'apprennent vite, sans solliciter les services | §7.3 : mémoire « épuisé » par instance, arrêt du client au 410 |
+| **Nombre exact de téléchargements** (éliminatoire) | Un lien autorise exactement N téléchargements, jamais un de plus | §6.1 : décrément atomique conditionnel DynamoDB |
+| **Aucune modification perdue** (éliminatoire) | Aucune modification acceptée n'est perdue ; tous convergent | §5 : CRDT Yjs + écriture DynamoDB **avant** diffusion |
+| **PDF à jour au moment du clic** | Un lien utilisé à T1 donne le document tel qu'à T1 | §6.2 : `seq` lu au clic, PDF à `pdfSeq ≥ seqRequis` |
+| **Crédit quotidien d'écriture** | Jamais plus que le crédit du jour, même depuis plusieurs appareils | §5.4 : débit conditionnel dans la même transaction que le journal |
+| **Tenue du pic d'affluence** | 15 000 visiteurs (80 % en 1 min) pendant que 300 rédacteurs écrivent | §7 : API sans état + montée programmée, 410 en mémoire |
+| **Annonce rapide de l'épuisement** | Après le dernier exemplaire, les visiteurs l'apprennent vite, sans solliciter les services | §7.3 : mémoire « épuisé » par instance, arrêt du client au 410 |
 
 Cadre : compte AWS en plan gratuit (100 $ de crédits), une seule région (eu-north-1),
 infrastructure en CDK, aucun secret dans le code.
 
 ## 2. Architecture
 
-```
-                         ┌──────────── CloudFront (*.cloudfront.net, HTTPS) ───────────┐
-Navigateur ── HTTPS ──►  │ /assets/* : cache  ·  le reste : CachingDisabled             │
-(rédacteurs, visiteurs)  │ transmet CloudFront-Viewer-Address, WebSocket, cookies       │
-                         └──────────────────────────────┬──────────────────────────────┘
-                                                        │ HTTP, liste de préfixes CloudFront seulement
-                                   ┌────────────────────▼────────────────────┐
-                                   │ ALB (2 zones) — /internal* → 403        │
-                                   └──────┬──────────────────────────┬───────┘
-                               /collab*   │                          │ tout le reste
-                  ┌───────────────────────▼─────┐      ┌─────────────▼──────────────────┐
-                  │ Serveur temps réel          │      │ API sans état + front statique │
-                  │ 1 × t3.small (ASG 1/1/1)    │      │ ASG t3.micro, 1 à 4, 2 zones   │
-                  │ Hocuspocus 4.7.1 + Yjs      │      │ Fastify 5                      │
-                  │ group commit, crédit,       │◄─SQS─┤ sessions, documents, liens,    │
-                  │ compaction, versions,       │ pdf- │ clic C1, anti-abus visiteurs,  │
-                  │ worker PDF (pdfkit)         │ requ.│ admin, SES, actions programmées│
-                  └───┬─────────────────┬───────┘      └───┬──────────────┬─────────────┘
-                      │                 │                  │              │
-              ┌───────▼───────┐  ┌──────▼──────┐   ┌───────▼──────┐  ┌────▼───────────────┐
-              │ DynamoDB      │  │ S3 privé,   │   │ SSM          │  │ SES · Auto Scaling │
-              │ 8 tables      │  │ versionné   │   │ (secrets)    │  │ CloudWatch Logs    │
-              │ à la demande  │  │ snapshots/, │   └──────────────┘  └────────────────────┘
-              └───────────────┘  │ pdf/        │
-                                 └─────────────┘
-```
+Le navigateur passe toujours par CloudFront, qui transmet tout à un équilibreur de
+charge (ALB). L'ALB envoie la connexion d'écriture (`/collab`, WebSocket) au serveur temps
+réel, et tout le reste (API, pages, fichiers du front) aux instances API. Le serveur
+temps réel écrit les modifications ; l'API gère les documents, les liens et les
+téléchargements. Les deux partagent DynamoDB et S3, et communiquent par une file SQS pour
+les demandes de PDF.
+
+![Figure 1 — Architecture de bout en bout](diagrammes/01-architecture.png)
+
+*Figure 1 — Architecture de bout en bout.*
 
 **Réseau.** VPC sur 2 zones, sous-réseaux publics, **pas de NAT Gateway** (≈ 35 $/mois
 évités). Les instances ont une IP publique mais leurs groupes de sécurité n'acceptent que
 l'ALB ; l'ALB n'accepte que la liste de préfixes gérée de CloudFront. Points de
 terminaison VPC *gateway* (gratuits) pour S3 et DynamoDB. Aucun port 22 : l'accès aux
 instances se fait par SSM Session Manager.
+
+![Figure 2 — Réseau et sécurité : qui peut parler à qui](diagrammes/02-reseau-securite.png)
+
+*Figure 2 — Réseau et sécurité : qui peut parler à qui.*
 
 **HTTPS sans nom de domaine.** CloudFront fournit `*.cloudfront.net` avec son certificat :
 aucun certificat ACM, aucun domaine à acheter. CloudFront est un service global sans
@@ -74,6 +81,10 @@ données ; toutes les ressources régionales sont en eu-north-1.
 de l'instance et lance un service systemd sous un utilisateur sans droits. Aucun
 `npm install` sur les instances. Journaux : agent CloudWatch vers `/editeur/api` et
 `/editeur/realtime` (rétention 7 jours).
+
+![Figure 3 — Déploiement : du dépôt aux instances](diagrammes/11-deploiement.png)
+
+*Figure 3 — Déploiement : du dépôt aux instances.*
 
 **Pourquoi un seul serveur temps réel.** 300 rédacteurs, c'est peu : une instance
 t3.small tient la charge (mesuré, §8 du rapport). Une autorité unique par document évite
@@ -97,6 +108,10 @@ document, avec Redis pour la présence.
 | `Blocks` | `subject` (`writer#email` / `ip#adresse`) | `reason`, `expireLe` | après `expireLe` |
 | `Presence` | `docId` | `title`, `connected`, `lastBeat` | 2 min |
 | `Versions` | `docId` + `createdAt` | `snapshotKey`, `seq`, `label`, `author` | — |
+
+![Figure 4 — Modèle de données (DynamoDB et S3)](diagrammes/03-donnees.png)
+
+*Figure 4 — Modèle de données (DynamoDB et S3).*
 
 Le mode à la demande suit la charge sans réglage et ne coûte rien au repos. Aucune table
 n'est lue par un *scan* sur un chemin chaud : les listes de documents d'un rédacteur et de
@@ -126,7 +141,7 @@ avec cycle de vie : versions non courantes supprimées après 30 jours, PDF apr�
   crédit et le blocage d'un rédacteur ; le blocage par adresse IP des visiteurs freine
   partiellement.
 
-## 5. Temps réel et C2 — aucune modification acceptée perdue
+## 5. Écriture en temps réel — aucune modification perdue
 
 ### 5.1 CRDT
 
@@ -151,8 +166,7 @@ WebSocket maison.
 ### 5.3 Group commit par document
 
 Une écriture par frappe et par rédacteur serait trop coûteuse et créerait des conflits
-sur l'élément du document. Chaque document a donc sa boucle d'écriture (validée par
-Alan le 25/10) :
+sur l'élément du document. Chaque document a donc sa boucle d'écriture :
 
 1. une seule transaction à la fois par document, lancée dès que la précédente est finie,
    avec au moins 100 ms entre deux débuts ;
@@ -169,6 +183,10 @@ Alan le 25/10) :
    délai aléatoire, sans rien refuser ;
 6. succès : application à la copie de référence (diffusion), puis confirmation `ack(seq)`.
 
+![Figure 5 — Écriture à plusieurs : rien n'est diffusé ni confirmé avant l'écriture DynamoDB](diagrammes/04-edition-temps-reel.png)
+
+*Figure 5 — Écriture à plusieurs : rien n'est diffusé ni confirmé avant l'écriture DynamoDB.*
+
 Une fenêtre fixe de 300 ms, prévue au départ, limitait chaque rédacteur à environ 3
 frappes/s, car Hocuspocus traite les messages d'une connexion un par un : d'où la boucle
 « dès que possible ».
@@ -178,7 +196,7 @@ les messages d'un rédacteur font la queue derrière les transactions (retard m�
 d'environ 1,1 s sur AWS, rapport §3). L'éditeur envoie donc ses frappes groupées toutes
 les 200 ms (`flushDelay` natif du provider Hocuspocus), comme prévu dans ce cas.
 
-### 5.4 Crédit (C4)
+### 5.4 Crédit quotidien d'écriture
 
 Seuls les caractères **insérés** comptent : le serveur décode l'update, ne garde que ce
 qu'il n'a pas encore (`diffUpdate` contre son vecteur d'état, pour ne pas débiter deux
@@ -193,7 +211,7 @@ Tout contenu qui n'est ni du texte ni un format autorisé (objets, images, sous-
 attributs inconnus) est refusé : il permettrait de contourner le décompte ou de produire
 un PDF faux.
 
-**Refus** (validé par Alan) : le serveur envoie un message `refus` puis ferme la
+**Refus** : le serveur envoie un message `refus` puis ferme la
 connexion au document avec un code (4001 crédit épuisé, 4003 rédacteur bloqué). Le
 client **détruit son Y.Doc** (qui contient la modification refusée) et en crée un neuf
 avant de se reconnecter. Après 4001 : lecture seule jusqu'à minuit UTC, les modifications
@@ -201,6 +219,10 @@ des autres restent visibles. Après 4003 : aucune reconnexion avant la fin du bl
 dont l'heure est affichée. Hocuspocus 4 ne transmet au client que la raison de fermeture
 (code toujours 1000, une socket portant plusieurs documents) : le code voyage donc dans
 le message `refus` et dans la raison.
+
+![Figure 6 — États de l'éditeur : connexion, refus, lecture seule, blocage](diagrammes/09-client-editeur.png)
+
+*Figure 6 — États de l'éditeur : connexion, refus, lecture seule, blocage.*
 
 ### 5.5 Chargement, compaction, arrêt brutal
 
@@ -214,6 +236,11 @@ le message `refus` et dans la raison.
 - Arrêt brutal de l'instance : ce qui est confirmé est dans DynamoDB. L'ASG relance une
   instance qui compacte au démarrage les documents en retard. Les clients se reconnectent
   et renvoient ce qui n'avait pas été confirmé ; Yjs ignore ce qui est déjà connu.
+  Ce scénario a été provoqué sur AWS le 26/10 : 26 354 frappes, aucune perdue (rapport §3).
+
+![Figure 7 — Chargement, compaction et reprise après un arrêt brutal](diagrammes/05-chargement-arret-brutal.png)
+
+*Figure 7 — Chargement, compaction et reprise après un arrêt brutal.*
 
 ### 5.6 Versions et mise en forme
 
@@ -223,7 +250,7 @@ le message `refus` et dans la raison.
   restaurer. Restaurer applique l'ancien contenu (texte et mise en forme) comme une
   **nouvelle modification**, écrite dans le journal comme toute autre ; on ne revient
   jamais en arrière dans le CRDT. Une restauration ne consomme pas de crédit.
-- Mise en forme (décision d'Alan du 26/10) : l'éditeur est Quill 2 lié au même `Y.Text`
+- Mise en forme : l'éditeur est Quill 2 lié au même `Y.Text`
   par `y-quill` ; les formats sont des attributs du texte. Seuls existent gras, italique,
   souligné, trois polices et quatre tailles (`FORMATS`), choisis pour être reproduits
   exactement dans le PDF avec les 12 polices standard de pdfkit (Helvetica, Times,
@@ -231,17 +258,17 @@ le message `refus` et dans la raison.
   embarquer. Les documents existants (texte brut dans le même `Y.Text`) restent
   compatibles.
 
-## 6. Liens, PDF : C1 et C3
+## 6. Liens de téléchargement et PDF
 
-### 6.1 Le clic (C1)
+### 6.1 Le clic : nombre exact de téléchargements
 
-`POST /api/links/:linkId/claim`, dans cet ordre (validé par Alan) :
+`POST /api/links/:linkId/claim`, dans cet ordre :
 
 1. **Ticket** valide (cookie signé HMAC, 2 min) → on relit la réservation et on délivre
    (URL enregistrée si elle n'a pas expiré ; sinon nouvelle URL sur le **même** PDF,
    substituée par écriture conditionnelle : une seule URL valide à la fois). Le ticket
-   passe avant la mémoire « épuisé », sinon le détenteur du dernier exemplaire recevrait
-   410.
+   passe avant la mémoire « épuisé » : sinon le détenteur du dernier exemplaire recevrait
+   un 410.
 2. Lien connu épuisé par cette instance → **410** immédiat, sans DynamoDB.
 3. Avant `opensAt` → **425** avec `opensAt` et `Retry-After` (5 à 62 s, avec une part
    aléatoire pour étaler les retours).
@@ -255,11 +282,15 @@ le message `refus` et dans la raison.
 5. Le décrément qui fait passer le stock à 0 est **unique** : c'est lui qui marque le lien
    épuisé et envoie l'e-mail SES au créateur, une seule fois par construction.
 
+![Figure 8 — Clic sur un lien et génération du PDF](diagrammes/06-telechargement.png)
+
+*Figure 8 — Clic sur un lien et génération du PDF.*
+
 Toutes les réponses de téléchargement portent `Cache-Control: no-store`, et CloudFront ne
 met pas en cache les routes d'API : un 410 en cache servi à un détenteur de ticket serait
 faux.
 
-**Un seul lien actif par document** (décision d'Alan du 26/10) : le lien et le pointeur
+**Un seul lien actif par document** : le lien et le pointeur
 `activeLinkId` du document sont écrits dans une transaction conditionnelle (« pas de lien
 actif ») ; deux créations simultanées → une seule réussit, l'autre reçoit 409 avec le lien
 existant. Un rédacteur peut **fermer** un lien : stock remis à 0 en une écriture atomique
@@ -269,8 +300,12 @@ remis ne peut plus être retéléchargé avec le ticket (410). Seule l'URL S3 d�
 reste valable jusqu'à son expiration (60 s). Si le lien avait une heure d'ouverture, la
 fermeture retire aussi la montée programmée (`BatchDeleteScheduledAction`, qui tolère une
 action déjà exécutée) et avance la descente à dans une minute : l'ASG API revient au
-minimum, que le pic ait commencé ou non. Le clic, chemin critique de C1, ne touche pas au document : un pointeur
-vers un lien épuisé est libéré paresseusement à la création suivante.
+minimum, que le pic ait commencé ou non. Le clic, chemin critique du décompte des exemplaires, ne touche pas au
+document : un pointeur vers un lien épuisé est libéré paresseusement à la création suivante.
+
+![Figure 9 — Cycle de vie d'un lien](diagrammes/07-cycle-de-vie-lien.png)
+
+*Figure 9 — Cycle de vie d'un lien.*
 
 **Pourquoi pas une transaction décrément + réservation.** Le décrément et la création de
 la réservation sont deux écritures. Une panne de l'instance entre les deux (quelques
@@ -281,12 +316,12 @@ contrairement aux `UpdateItem` que DynamoDB sérialise : au pic (≈ 200 clics/s
 lien), cela produirait des conflits en masse et doublerait le coût d'écriture. Nous gardons
 donc l'`UpdateItem` conditionnel et assumons ce cas de panne.
 
-### 6.2 Génération des PDF (C3)
+### 6.2 Génération des PDF : document à jour au moment du clic
 
 - Garantie : le PDF obtenu par un visiteur qui clique à T1 contient au moins toutes les
   modifications acceptées avant T1 (il peut en contenir de plus récentes).
 - Au clic, `seqRequis = seq` du document (lecture fortement cohérente). L'API demande un
-  PDF par la file SQS `editeur-pdf-requests` `{docId, seqRequis}` (validée par Alan :
+  PDF par la file SQS `editeur-pdf-requests` `{docId, seqRequis}` (choisie pour le
   découplage, aucune route interne, IAM par composant), en amortissant ses envois (une
   demande par document sauf séquence plus récente ou plus de 5 s écoulées).
 - Le serveur temps réel lit la file en *long polling* et fait **une génération à la fois
@@ -301,7 +336,7 @@ donc l'`UpdateItem` conditionnel et assumons ce cas de panne.
 - Une réservation fige son PDF (`pdfKey`) à sa première URL : une URL renouvelée pointe sur
   le même fichier.
 
-## 7. Le pic : C5 et C6
+## 7. Le pic d'affluence
 
 ### 7.1 Capacité
 
@@ -316,13 +351,21 @@ donc l'`UpdateItem` conditionnel et assumons ce cas de panne.
 - Élément chaud : ≈ 200 décréments/s sur un seul lien, sous la limite d'environ 1 000
   écritures/s d'une partition DynamoDB.
 
+![Figure 10 — Le pic autour de l'heure d'ouverture (exemple : 18:00)](diagrammes/10-pic.png)
+
+*Figure 10 — Le pic autour de l'heure d'ouverture (exemple : 18:00).*
+
 ### 7.2 Chaque visiteur reçoit une réponse
 
 La page de téléchargement a trois états visibles : **télécharge** (200), **patiente**
 (202 réservé, 425 pas encore ouvert, ou erreur passagère 5xx : nouvel essai avec délai
 croissant), **épuisé** (410). Seul un lien inconnu (404) arrête la page sans état final.
 
-### 7.3 Après le dernier exemplaire (C6)
+![Figure 11 — Page de téléchargement : chaque visiteur reçoit une réponse](diagrammes/08-page-telechargement.png)
+
+*Figure 11 — Page de téléchargement : chaque visiteur reçoit une réponse.*
+
+### 7.3 Après le dernier exemplaire : annonce rapide de l'épuisement
 
 Pas de *push* : les visiteurs interrogent avec `Retry-After`. Chaque instance API mémorise
 les liens épuisés : un 410 est servi **sans aucun accès à DynamoDB** (10 ms au 95ᵉ
@@ -390,6 +433,6 @@ journaux gardés 7 jours, instance de test de charge créée puis détruite pour
 |---|---|---|
 | Fenêtre fixe de 300 ms par document | Transaction dès que possible, ≥ 100 ms entre deux | Hocuspocus traite les messages d'une connexion un par un : 300 ms limitaient chaque rédacteur à ~3 frappes/s |
 | Une frappe = un message | Regroupement côté client 200 ms | Retard médian ≈ 1,1 s sur AWS à 8 frappes/s sans regroupement |
-| Éditeur CodeMirror (texte brut) | Quill 2 + y-quill (mise en forme) | Demande d'Alan le 26/10 ; même `Y.Text`, formats limités et reproduits dans le PDF |
-| Plusieurs liens par document | Un seul lien actif, fermeture possible | Demande d'Alan le 26/10 |
+| Éditeur CodeMirror (texte brut) | Quill 2 + y-quill (mise en forme) | Retour après essai de l'application (26/10) ; même `Y.Text`, formats limités et reproduits dans le PDF |
+| Plusieurs liens par document | Un seul lien actif, fermeture possible | Retour après essai de l'application (26/10) : plusieurs liens pour un même document prêtaient à confusion |
 | URL de réservation : jamais une nouvelle | Nouvelle URL sur le même PDF si l'ancienne a expiré | Un visiteur dont l'URL a expiré pendant le téléchargement doit pouvoir réessayer ; toujours une seule URL valide |

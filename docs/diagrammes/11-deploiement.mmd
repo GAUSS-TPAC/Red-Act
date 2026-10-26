@@ -1,0 +1,18 @@
+%% Du dépôt aux instances : scripts/deploy.sh
+flowchart TB
+  subgraph Poste["Poste du développeur"]
+    DS["scripts/deploy.sh"]
+    B["npm ci + esbuild<br/>server.cjs · pdf-worker.cjs<br/>front à empreintes"]
+    CDK["cdk deploy EditeurPartage<br/>(CloudFormation)"]
+  end
+  DS -- "1. crée les secrets si absents" --> SSM["SSM SecureString<br/>/editeur/hmac-secret<br/>/editeur/admin-token"]
+  DS -- "2. compile" --> B
+  B --> CDK
+  CDK -- "3. bundles publiés comme assets" --> AS3[("Bucket d'assets CDK")]
+  CDK -- "4. crée ou met à jour" --> STACK["Stack EditeurPartage<br/>VPC, ALB, CloudFront, ASG,<br/>tables, bucket, file, rôles"]
+  STACK --> EC2["Instance Amazon Linux 2023<br/>user data : Node 20,<br/>bundle téléchargé via le rôle,<br/>service systemd sans droits"]
+  AS3 -. "lecture par le rôle de l'instance" .-> EC2
+  EC2 -. "secrets au démarrage" .-> SSM
+  EC2 -- "agent CloudWatch" --> CW["CloudWatch Logs (7 jours)"]
+
+  T["scripts/destroy.sh"] -- "vide les buckets versionnés,<br/>cdk destroy, supprime les secrets" --> STACK
