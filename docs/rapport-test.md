@@ -91,6 +91,20 @@ dernières modifications à toutes les copies, puis :
 | `c2/2026-10-26T00-35-17-613Z-aws.json` | AWS (après la refonte), 60 s | 9 547 | 9 547 | 0 | p95 1 810 → 1 854 ms (stable) | identiques ; 562 seq, 0 manquant ; base identique | OK |
 | `c2/2026-10-26T00-37-16-279Z-aws.json` | AWS, 60 s, regroupement 200 ms | 9 560 | 9 560 | 0 | p95 1 045 → 1 305 ms (stable) | identiques ; 473 seq, 0 manquant ; base identique | OK |
 | `c2/2026-10-26T00-46-41-544Z-aws.json` | AWS, front redéployé, regroupement 200 ms | 9 541 | 9 541 | 0 | p95 978 → 1 253 ms (stable) | identiques, 0 manquant ; base identique | OK |
+| `c2/2026-10-26T03-55-23-253Z-aws.json` | AWS, 10 s, liaison du poste dégradée | 1 580 | 1 580 | 0 | p95 12,9 → 22,8 s (croissant ¹) | identiques ; 116 seq, 0 manquant ; base identique | C2 OK ¹ |
+| `c2/2026-10-26T03-59-25-925Z-aws.json` | AWS, 180 s, regroupement 200 ms, **arrêt brutal à 04:01:01 UTC** | 26 354 | 25 091 + 1 263 renvoyées ² | 0 | p95 1,9 → 13,6 s (coupure ³) | longueur 26 354 = envoyées ; identiques ; 1 222 seq, 0 manquant ; base identique | **C2 OK** |
+
+¹ Le fichier porte `ok: false` : le script comptait alors la tendance du retard dans son
+verdict. Côté serveur, au même moment, les journaux « mesure confirmation » donnaient
+p95 111 ms et 1,6 % de CPU ; la page `/sante` mettait 8 s à répondre au poste (ping 320 à
+470 ms). Le retard croissant venait de la liaison du poste, pas du serveur. Depuis, le
+script sépare les deux : le verdict C2 ne porte que sur les pertes et la convergence, et un
+retard croissant est affiché comme une alerte (`latencyTrend.growing` dans le JSON).
+² Frappes en vol au moment de la coupure : renvoyées par la resynchronisation à la
+reconnexion, donc sans accusé rattaché à la frappe, mais toutes présentes dans le
+document final et en base.
+³ La coupure et la reconnexion (56 déconnexions sur 20 clients) font monter le retard ;
+la liaison du poste était dégradée pendant ce tirage.
 
 **Tirages écartés, et pourquoi.**
 - `c2/2026-10-25T18-49-40-901Z-local.json` : retard croissant (p95 775 → 2 278 ms), premier
@@ -124,12 +138,17 @@ région (test de charge, §6), les 300 rédacteurs avaient une médiane de 85 ms
 d'environ 150 ms en début de test. Le retard propre au serveur est mesuré par le serveur
 lui-même et écrit dans ses journaux (`mesure confirmation`, §6).
 
-**Arrêt brutal de l'instance temps réel.** Variante prévue (commande dans le README,
-section « Tester »), réservée à Alan car elle termine une instance de production : **non
-encore exécutée** à la date de ce rapport. Ce qui la rend sûre par construction : une
-modification n'est confirmée qu'après son écriture dans DynamoDB ; au redémarrage, le
-serveur recharge instantané + journal ; les clients renvoient ce qui n'était pas confirmé
-et Yjs ignore les doublons.
+**Arrêt brutal de l'instance temps réel** (`c2/2026-10-26T03-59-25-925Z-aws.json`, lancé à
+la demande d'Alan). 20 clients × 8 caractères/s pendant 180 s, au même endroit. À 04:01:01
+UTC, en pleine frappe, le noyau de l'instance `i-0005024579b402fcd` est redémarré de force
+(sysrq) : Node est tué net, sans arrêt propre ni vidage. Le serveur est reparti seul
+(journal « serveur temps réel démarré », document rechargé depuis la base à `seq` 602).
+Résultat : 26 354 frappes envoyées, document final de 26 354 caractères ; 20 copies,
+vecteurs d'état et état relu depuis la base identiques ; les 1 222 séquences confirmées
+sont toutes présentes. **Aucune modification acceptée n'a été perdue.** C'est ce que
+garantit la construction : une modification n'est confirmée qu'après son écriture dans
+DynamoDB ; au redémarrage, le serveur recharge instantané + journal ; les clients
+renvoient ce qui n'était pas confirmé et Yjs ignore les doublons.
 
 **Analyse.** Dans tous les tirages exploitables, local et AWS : **toutes** les frappes
 envoyées ont été confirmées, **toutes** les séquences confirmées sont dans le journal et
@@ -265,12 +284,11 @@ derrière un même NAT (campus, 4G) n'est pas mesuré (voir dossier §8, limite 
 | Contrainte | Preuve | État |
 |---|---|---|
 | C1 | 3 tirages locaux à K = 500, 3 à K = 1 contre 2 000 clics, 3 tirages AWS à K = 500, et 5 000 / 5 000 au pic : jamais un de plus | **Tenue** |
-| C2 | 20 clients au même endroit, local et AWS : 100 % confirmé, 0 seq manquant, copies et base identiques | **Tenue** (arrêt brutal : à exécuter par Alan) |
+| C2 | 20 clients au même endroit, local et AWS : 100 % confirmé, 0 seq manquant, copies et base identiques | **Tenue**, y compris après arrêt brutal du serveur temps réel en pleine frappe |
 | C3 | PDF à `pdfSeq ≥` dernière modification confirmée avant le clic, sur AWS ; texte exact en local | Tenue |
 | C4 | 3 appareils, 2 documents : 9 800 acceptés = crédit débité ≤ 10 000 | Tenue |
 | C5 | 15 819 visiteurs, 0 sans réponse, 0 % d'échec, 300 rédacteurs servis | Tenue |
 | C6 | 410 en 10 ms (p95) sans DynamoDB, arrêt du client au 410 | Tenue |
 
-Restent à faire avant la soutenance : la variante d'arrêt brutal de C2 sur AWS, et un
-second passage du test de charge avec le générateur corrigé (courbe de retard côté
+Reste à faire avant la soutenance : un second passage du test de charge avec le générateur corrigé (courbe de retard côté
 serveur).

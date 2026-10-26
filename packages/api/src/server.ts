@@ -44,6 +44,7 @@ async function main() {
       adminToken,
       visitorGuard,
       scheduleScaling: asg ? (linkId, opensAt) => asg.scheduleForLink(linkId, opensAt) : undefined,
+      unscheduleScaling: asg ? (linkId) => asg.unscheduleForLink(linkId) : undefined,
       claims: new ClaimService({
         db,
         hmacSecret,

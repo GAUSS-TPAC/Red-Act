@@ -228,7 +228,7 @@ export class MainStack extends Stack {
       roles: [apiRole],
       statements: [
         new iam.PolicyStatement({
-          actions: ["autoscaling:PutScheduledUpdateGroupAction"],
+          actions: ["autoscaling:PutScheduledUpdateGroupAction", "autoscaling:BatchDeleteScheduledAction"],
           resources: [
             `arn:${this.partition}:autoscaling:${this.region}:${this.account}:autoScalingGroup:*:autoScalingGroupName/${apiAsg.autoScalingGroupName}`,
           ],

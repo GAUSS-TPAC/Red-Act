@@ -407,8 +407,11 @@ paths:
       tags: [liens]
       summary: Fermer un lien avant épuisement (éditeurs du document)
       description: |
-        Le stock est remis à 0 en une écriture atomique : les clics suivants reçoivent 410,
-        les exemplaires déjà réservés restent téléchargeables (ticket), et le document
+        Le stock est remis à 0 en une écriture atomique : les clics suivants reçoivent 410.
+        Une réservation encore en attente du PDF (202) est honorée ; un exemplaire déjà
+        remis ne se retélécharge plus avec le ticket (410). L'URL S3 déjà donnée reste
+        valable jusqu'à son expiration (60 s). Les actions programmées du lien (pic
+        autour de `opensAt`) sont retirées. Le document
         peut recevoir un nouveau lien. Idempotent : fermer un lien déjà fermé ou épuisé
         renvoie son état.
       security: [{ session: [] }]

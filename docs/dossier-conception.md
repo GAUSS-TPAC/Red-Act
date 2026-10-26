@@ -263,8 +263,13 @@ faux.
 `activeLinkId` du document sont écrits dans une transaction conditionnelle (« pas de lien
 actif ») ; deux créations simultanées → une seule réussit, l'autre reçoit 409 avec le lien
 existant. Un rédacteur peut **fermer** un lien : stock remis à 0 en une écriture atomique
-(les clics suivants reçoivent 410), réservations déjà faites honorées, document libre pour
-un nouveau lien. Le clic, chemin critique de C1, ne touche pas au document : un pointeur
+(les clics suivants reçoivent 410), document libre pour un nouveau lien. Une réservation
+encore en attente du PDF (202) au moment de la fermeture est honorée ; un exemplaire déjà
+remis ne peut plus être retéléchargé avec le ticket (410). Seule l'URL S3 déjà donnée
+reste valable jusqu'à son expiration (60 s). Si le lien avait une heure d'ouverture, la
+fermeture retire aussi la montée programmée (`BatchDeleteScheduledAction`, qui tolère une
+action déjà exécutée) et avance la descente à dans une minute : l'ASG API revient au
+minimum, que le pic ait commencé ou non. Le clic, chemin critique de C1, ne touche pas au document : un pointeur
 vers un lien épuisé est libéré paresseusement à la création suivante.
 
 **Pourquoi pas une transaction décrément + réservation.** Le décrément et la création de
@@ -377,7 +382,6 @@ journaux gardés 7 jours, instance de test de charge créée puis détruite pour
 | Seuil anti-abus par IP | Visiteurs derrière un même NAT bloqués 10 min | Défi (captcha) au lieu d'un blocage |
 | Polices du PDF | Encodage WinAnsi : pas d'emoji ni d'écritures non latines | Polices TrueType embarquées |
 | Lien sans `opensAt` | Seul le scaling réactif joue (2 à 3 min) | Capacité minimale plus haute pendant la publication |
-| Fermer un lien ne retire pas ses actions programmées | L'API monte quand même à 4 instances autour de l'`opensAt` prévu (≈ 25 min, quelques centimes) | `DeleteScheduledAction` à la fermeture (droit limité à l'ASG API) |
 | Mise à jour de l'API sans attente de santé | Pendant un déploiement, courte fenêtre (≈ 2 min observées le 26/10) où la nouvelle instance API n'est pas encore saine | Mise à jour progressive avec `minInstancesInService: 1` et signaux de démarrage |
 
 ## 12. Écarts par rapport aux décisions initiales

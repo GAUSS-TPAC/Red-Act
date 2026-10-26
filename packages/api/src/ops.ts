@@ -8,6 +8,7 @@
  */
 import {
   AutoScalingClient,
+  BatchDeleteScheduledActionCommand,
   DescribeAutoScalingGroupsCommand,
   PutScheduledUpdateGroupActionCommand,
 } from "@aws-sdk/client-auto-scaling";
@@ -93,6 +94,25 @@ export function autoScaling(asgName: string) {
           AutoScalingGroupName: asgName,
           ScheduledActionName: `lien-${linkId}-descente`,
           StartTime: new Date(Math.max(opensAt + SCALE_DOWN_AFTER_MS, up + 60_000)),
+          MinSize: 1,
+        }),
+      );
+    },
+    /**
+     * Lien fermé avant son pic : la montée est retirée (BatchDelete tolère une action
+     * déjà exécutée, qu'AWS a supprimée) et la descente avancée à dans 1 min. Si la
+     * montée avait déjà eu lieu, l'ASG revient ainsi au minimum ; sinon la descente ne
+     * change rien (minimum déjà à 1) et disparaît après son exécution.
+     */
+    async unscheduleForLink(linkId: string, now = Date.now()) {
+      await client.send(
+        new BatchDeleteScheduledActionCommand({ AutoScalingGroupName: asgName, ScheduledActionNames: [`lien-${linkId}-montee`] }),
+      );
+      await client.send(
+        new PutScheduledUpdateGroupActionCommand({
+          AutoScalingGroupName: asgName,
+          ScheduledActionName: `lien-${linkId}-descente`,
+          StartTime: new Date(now + 60_000),
           MinSize: 1,
         }),
       );

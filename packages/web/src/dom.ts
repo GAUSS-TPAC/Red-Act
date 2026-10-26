@@ -29,10 +29,14 @@ export function mount(parent: Element, ...children: Child[]) {
 export const formatDateTime = (ms: number) =>
   new Date(ms).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
 
+// Teintes nettement distinctes, assez foncées pour un nom en blanc : deux teintes HSL
+// voisines (ancien calcul, 304° et 298° pour deux adresses proches) se confondaient.
+const HUES = [4, 28, 48, 96, 150, 180, 205, 230, 270, 320];
+
 /** Couleur stable dérivée d'un texte (curseurs et présence). */
 export function colorFor(text: string): { color: string; light: string } {
-  let hash = 0;
-  for (const char of text) hash = (hash * 31 + char.charCodeAt(0)) | 0;
-  const hue = Math.abs(hash) % 360;
-  return { color: `hsl(${hue} 65% 42%)`, light: `hsl(${hue} 65% 42% / 0.2)` };
+  let hash = 0x811c9dc5; // FNV-1a : mieux réparti que *31 sur des adresses voisines
+  for (const char of text) hash = Math.imul(hash ^ char.charCodeAt(0), 0x01000193);
+  const hue = HUES[(hash >>> 0) % HUES.length]!;
+  return { color: `hsl(${hue} 70% 38%)`, light: `hsl(${hue} 70% 38% / 0.2)` };
 }

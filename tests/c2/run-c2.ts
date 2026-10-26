@@ -68,7 +68,9 @@ async function main() {
   if (remote) {
     setDefaultAutoSelectFamilyAttemptTimeout(5000); // liaison lente du poste (voir run-c1)
     url = `${remote.replace(/^http/, "ws")}/collab`;
-    tokens = await Promise.all(emails.map(async (email) => (await api(remote, "/api/session", { name: "C2", email })).token as string));
+    // Une session après l'autre : 20 connexions simultanées dépassent parfois le délai depuis le poste.
+    tokens = [];
+    for (const email of emails) tokens.push((await api(remote, "/api/session", { name: "C2", email })).token as string);
     docId = (await api(remote, "/api/documents", { title: `C2 ${stamp}` }, tokens[0])).docId as string;
     for (const email of emails.slice(1)) await api(remote, `/api/documents/${docId}/editors`, { email }, tokens[0]);
   } else {
@@ -140,8 +142,10 @@ async function main() {
     latencyTrend: { firstThirdP95: Math.round(firstP95), lastThirdP95: Math.round(lastP95), growing },
     convergence,
   };
+  // Verdict C2 = aucune perte et convergence. Le retard croissant est une mesure à
+  // signaler (CLAUDE.md §5), pas un critère de C2 : un arrêt brutal ou une liaison
+  // dégradée le fait forcément grimper sans rien perdre.
   const ok =
-    !growing &&
     result.refusals === 0 &&
     (convergence === null ||
       (convergence.identicalTexts &&
@@ -159,8 +163,9 @@ async function main() {
   console.log(
     `${clients} rédacteurs × ${rate} car./s × ${durationMs / 1000} s : ${sent} frappes, ${all.length} confirmées, ` +
       `p95 début ${Math.round(firstP95)} ms → fin ${Math.round(lastP95)} ms${growing ? " (CROISSANT)" : ""}, ` +
-      `convergence ${convergence ? JSON.stringify({ ...convergence, missingAckedSeqs: convergence.missingAckedSeqs.length }) : "non vérifiée (--bucket)"} → ${ok ? "OK" : "ÉCHEC"}`,
+      `convergence ${convergence ? JSON.stringify({ ...convergence, missingAckedSeqs: convergence.missingAckedSeqs.length }) : "non vérifiée (--bucket)"} → C2 ${ok ? "OK" : "ÉCHEC"}`,
   );
+  if (growing) console.log("attention : retard de confirmation croissant (mesure à signaler, sans effet sur le verdict C2)");
   console.log(`résultats bruts : ${file}`);
   process.exit(ok ? 0 : 1);
 }

@@ -65,9 +65,11 @@ describe.skipIf(!dbUp)("anti-abus visiteurs (DynamoDB Local)", () => {
 
 describe.skipIf(!dbUp)("tableau de bord et actions programmées (DynamoDB Local)", () => {
   const scheduled: { linkId: string; opensAt: number }[] = [];
+  const unscheduled: string[] = [];
   const { app } = createLocalApi(undefined, {
     adminToken: "jeton-admin-de-test",
     scheduleScaling: async (linkId, opensAt) => void scheduled.push({ linkId, opensAt }),
+    unscheduleScaling: async (linkId) => void unscheduled.push(linkId),
   });
   const auth = { authorization: `Bearer ${createSessionToken({ email: "admin-test@test.local", name: "A" }, TEST_SECRET)}` };
   const admin = { "x-admin-token": "jeton-admin-de-test" };
@@ -103,5 +105,20 @@ describe.skipIf(!dbUp)("tableau de bord et actions programmées (DynamoDB Local)
     await db.send(new PutCommand({ TableName: TABLES.presence.tableName, Item: { docId, title: "Admin", connected: 3, lastBeat: now, ttl: 0 } }));
     const ouverts = (await app.inject({ method: "GET", url: "/api/admin/documents-ouverts", headers: admin })).json().documents;
     expect(ouverts).toContainEqual(expect.objectContaining({ docId, title: "Admin", connected: 3 }));
+  });
+
+  it("fermer un lien à heure d'ouverture retire ses actions programmées (une seule fois)", async () => {
+    const docId = (await app.inject({ method: "POST", url: "/api/documents", headers: auth, payload: { title: "Pic annulé" } })).json().docId;
+    const create = (payload: object) => app.inject({ method: "POST", url: `/api/documents/${docId}/links`, headers: auth, payload });
+    const close = (linkId: string) => app.inject({ method: "POST", url: `/api/links/${linkId}/close`, headers: auth });
+
+    const timed = (await create({ max: 3, opensAt: new Date(Date.now() + 3_600_000).toISOString() })).json();
+    await close(timed.linkId);
+    await close(timed.linkId); // déjà fermé : rien de plus
+    expect(unscheduled.filter((id) => id === timed.linkId)).toHaveLength(1);
+
+    const plain = (await create({ max: 3 })).json(); // sans heure d'ouverture : pas d'action
+    await close(plain.linkId);
+    expect(unscheduled).not.toContain(plain.linkId);
   });
 });

@@ -50,6 +50,8 @@ export interface ClaimDeps {
 export class ClaimService {
   /** Liens que cette instance sait épuisés : 410 immédiat, sans DynamoDB (C6). */
   private readonly exhausted = new Set<string>();
+  /** Liens fermés par un rédacteur (sous-ensemble de `exhausted`) : la fermeture est définitive. */
+  private readonly closed = new Set<string>();
   private readonly now: () => number;
 
   constructor(private readonly deps: ClaimDeps) {
@@ -65,7 +67,12 @@ export class ClaimService {
       const ticket = verifyTicket(ticketToken, this.deps.hmacSecret, Math.floor(now / 1000));
       if (ticket.ok && ticket.claims.linkId === linkId) {
         const reservation = await this.getReservation(ticket.claims.reservationId);
-        if (reservation && reservation.linkId === linkId) return this.deliver(reservation);
+        if (reservation && reservation.linkId === linkId) {
+          // Exemplaire déjà remis et lien fermé depuis : plus de nouveau téléchargement.
+          // Une réservation pas encore servie (202) reste honorée : elle précède la fermeture.
+          if (reservation.url && (await this.isClosed(linkId))) return { kind: "epuise" };
+          return this.deliver(reservation);
+        }
       }
     }
 
@@ -78,6 +85,7 @@ export class ClaimService {
     if (!link) return { kind: "inconnu" };
     if (link.status === "epuise" || link.status === "ferme") {
       this.exhausted.add(linkId);
+      if (link.status === "ferme") this.closed.add(linkId);
       return { kind: "epuise" };
     }
     if (link.opensAt !== undefined && link.opensAt > now) {
@@ -220,6 +228,19 @@ export class ClaimService {
       // Le stock est déjà à 0 en base : C1 tient même si le marquage échoue.
       this.deps.log.error({ error, linkId: link.linkId }, "marquage du lien épuisé incomplet");
     }
+  }
+
+  private async isClosed(linkId: string): Promise<boolean> {
+    if (this.closed.has(linkId)) return true;
+    const link = (
+      await this.deps.db.send(
+        new GetCommand({ TableName: TABLES.links.tableName, Key: { linkId }, ConsistentRead: true, ProjectionExpression: "#status", ExpressionAttributeNames: { "#status": "status" } }),
+      )
+    ).Item as Pick<LinkItem, "status"> | undefined;
+    if (link?.status !== "ferme") return false;
+    this.closed.add(linkId);
+    this.exhausted.add(linkId);
+    return true;
   }
 
   private async getDocument(docId: string) {

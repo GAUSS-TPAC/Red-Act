@@ -324,6 +324,28 @@ describe.skipIf(!dbUp)("un seul lien actif par document, fermeture, renommage (D
     expect((await list()).map((l: { status: string }) => l.status)).toEqual(["actif", "ferme"]);
   });
 
+  it("après fermeture, un ticket déjà servi ne retélécharge plus ; une réservation en attente reste honorée", async () => {
+    const { docId, auth, create } = await newDoc();
+    const { linkId } = (await create(10)).json();
+    const setPdfSeq = (pdfSeq: number) =>
+      db.send(new UpdateCommand({ TableName: TABLES.documents.tableName, Key: { docId }, UpdateExpression: "SET pdfSeq = :p", ExpressionAttributeValues: { ":p": pdfSeq } }));
+    const withTicket = (ticket?: string) =>
+      app.inject({ method: "POST", url: `/api/links/${linkId}/claim`, headers: ticket ? { cookie: `ticket=${ticket}` } : {} });
+    const ticketOf = (r: { headers: Record<string, unknown> }) => readCookie(String(r.headers["set-cookie"] ?? "").split(";")[0], "ticket");
+
+    await setPdfSeq(-1); // pas encore de PDF : la seconde réservation attendra (202)
+    const pending = await withTicket();
+    expect(pending.statusCode).toBe(202);
+    await setPdfSeq(0);
+    const served = await withTicket();
+    expect(served.statusCode).toBe(200);
+    expect((await withTicket(ticketOf(served))).statusCode).toBe(200); // avant fermeture : même exemplaire
+
+    await app.inject({ method: "POST", url: `/api/links/${linkId}/close`, headers: auth });
+    expect((await withTicket(ticketOf(served))).statusCode).toBe(410);
+    expect((await withTicket(ticketOf(pending))).statusCode).toBe(200);
+  });
+
   it("un non-éditeur ne peut ni fermer ni renommer", async () => {
     const { docId, create } = await newDoc();
     const { linkId } = (await create(1)).json();

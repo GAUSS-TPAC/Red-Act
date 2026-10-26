@@ -26,6 +26,7 @@ import {
 } from "@editeur/shared";
 import { viewerIp, type VisitorGuard } from "./abuse.ts";
 import { ClaimService, type ClaimOutcome } from "./links/claim.ts";
+import { SCALE_DOWN_AFTER_MS } from "./ops.ts";
 
 export interface RouteDeps {
   db: DynamoDBDocumentClient;
@@ -37,6 +38,8 @@ export interface RouteDeps {
   visitorGuard?: VisitorGuard;
   /** Actions programmées sur l'ASG API autour de `opensAt` (§6, pic). */
   scheduleScaling?: (linkId: string, opensAt: number) => Promise<void>;
+  /** Retrait de ces actions quand le lien est fermé avant la fin du pic. */
+  unscheduleScaling?: (linkId: string) => Promise<void>;
   now?: () => number;
 }
 
@@ -474,6 +477,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
       const doc = await readDocument(link.docId);
       if (!doc?.editors.has(request.writer!.email)) return reply.code(403).send({ erreur: "acces-refuse" });
       let closed: LinkItem;
+      let closedNow = false;
       try {
         closed = (
           await deps.db.send(
@@ -489,12 +493,19 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
             }),
           )
         ).Attributes as LinkItem;
+        closedNow = true;
       } catch (error) {
         if (!(error instanceof ConditionalCheckFailedException)) throw error;
         closed = (await deps.db.send(new GetCommand({ TableName: TABLES.links.tableName, Key: { linkId: link.linkId }, ConsistentRead: true })))
           .Item as LinkItem;
       }
       await releaseActiveLink(link.docId, link.linkId);
+      // Plus de pic à attendre : on retire la montée programmée (échec non bloquant).
+      if (closedNow && closed.opensAt !== undefined && closed.opensAt + SCALE_DOWN_AFTER_MS > now()) {
+        await deps.unscheduleScaling?.(link.linkId).catch((error: unknown) =>
+          request.log.error({ error, linkId: link.linkId }, "retrait des actions programmées impossible"),
+        );
+      }
       return linkView(closed);
     },
   );

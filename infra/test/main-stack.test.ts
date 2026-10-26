@@ -237,6 +237,7 @@ describe("étape 6 : exploitation", () => {
   it("l'API ne programme des actions que sur son propre ASG", () => {
     const policy = JSON.stringify(template.findResources("AWS::IAM::Policy", { Properties: { PolicyName: Match.stringLikeRegexp("ApiScaling") } }));
     expect(policy).toContain("autoscaling:PutScheduledUpdateGroupAction");
+    expect(policy).toContain("autoscaling:BatchDeleteScheduledAction");
     expect(policy).toContain("autoScalingGroupName/");
   });
 

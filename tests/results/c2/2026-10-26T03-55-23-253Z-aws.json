@@ -1,0 +1,46 @@
+{
+  "target": "aws",
+  "startedAt": "2026-10-26T03:56:16.621Z",
+  "docId": "a4abe02d-e6c9-4402-9f63-8e66338a8de5",
+  "clients": 20,
+  "ratePerClient": 8,
+  "flushDelayMs": 0,
+  "durationS": 10,
+  "sent": 1580,
+  "confirmed": 1580,
+  "refusals": 0,
+  "disconnects": 7,
+  "settleMs": 35277,
+  "latencyWindows": [
+    {
+      "fromS": 0,
+      "count": 780,
+      "p50": 3312,
+      "p95": 12949,
+      "max": 24716
+    },
+    {
+      "fromS": 5,
+      "count": 800,
+      "p50": 13482,
+      "p95": 22789,
+      "max": 38054
+    }
+  ],
+  "latencyTrend": {
+    "firstThirdP95": 12949,
+    "lastThirdP95": 22789,
+    "growing": true
+  },
+  "convergence": {
+    "clients": 20,
+    "length": 1580,
+    "identicalTexts": true,
+    "identicalStateVectors": true,
+    "persistedMatches": true,
+    "ackedSeqs": 116,
+    "missingAckedSeqs": [],
+    "journalSeq": 116
+  },
+  "ok": false
+}

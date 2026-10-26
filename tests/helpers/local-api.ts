@@ -22,7 +22,7 @@ export function createLocalApi(
   now?: () => number,
   options: { requestPdf?: (docId: string, seqRequis: number) => Promise<void> } & Pick<
     RouteDeps,
-    "visitorGuard" | "scheduleScaling"
+    "visitorGuard" | "scheduleScaling" | "unscheduleScaling"
   > & { adminToken?: string } = {},
 ): LocalApi {
   const db = createDocumentClient(LOCAL_ENDPOINT);
