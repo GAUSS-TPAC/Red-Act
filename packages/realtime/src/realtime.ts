@@ -8,6 +8,7 @@
  * Hocuspocus le réapplique sans effet (Yjs est idempotent) et confirme au client
  * (SyncStatus). Lever une erreur dans `beforeSync` ferme la connexion au document.
  */
+import { performance } from "node:perf_hooks";
 import { Server, type Connection, type Document } from "@hocuspocus/server";
 import { ScanCommand, GetCommand, PutCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 import {
@@ -19,6 +20,7 @@ import {
   type ClientMessage,
   type DocumentItem,
   type RefusalCode,
+  type Segment,
   type ServerMessage,
 } from "@editeur/shared";
 import * as Y from "yjs";
@@ -31,6 +33,12 @@ import { loadDocument, saveSnapshot, type BlobStore } from "./store.ts";
 export const COMPACTION = { maxEntries: 500, maxAgeMs: 5 * 60 * 1000 };
 /** Battement de présence des documents ouverts, pour le tableau de bord (§5). */
 export const PRESENCE_INTERVAL_MS = 30_000;
+/**
+ * Mesure côté serveur, écrite dans les journaux (CloudWatch) toutes les 30 s :
+ * retard réception → confirmation des modifications et charge de la boucle
+ * d'événements. Elle ne dépend pas du générateur de charge (rapport de test).
+ */
+export const MEASURE_INTERVAL_MS = 30_000;
 
 export interface Writer {
   email: string;
@@ -65,6 +73,7 @@ export function createRealtimeServer(deps: RealtimeDeps) {
   const compaction = deps.compaction ?? COMPACTION;
   const open = new Map<string, OpenDocument>();
   const writers = new WriterGuard(deps.db, now);
+  let latencies: number[] = [];
 
   const compact = (docId: string, entry: OpenDocument, doc: Y.Doc) => {
     if (entry.compacting || entry.committer.seq <= entry.snapshotSeq) return entry.compacting;
@@ -183,8 +192,10 @@ export function createRealtimeServer(deps: RealtimeDeps) {
       }
 
       try {
+        const receivedAt = performance.now();
         const seq = await entry.committer.submit(payload, context.email, analysis.chars);
         connection.sendStateless(JSON.stringify({ type: "ack", seq } satisfies ServerMessage));
+        latencies.push(performance.now() - receivedAt);
       } catch (error) {
         if (error instanceof Refusal) refuse(connection, context.email, error);
         throw error;
@@ -199,6 +210,12 @@ export function createRealtimeServer(deps: RealtimeDeps) {
       if (!entry) return;
       const writer = (connection.context as Writer).email;
       const reply = (message: ServerMessage) => connection.sendStateless(JSON.stringify(message));
+      const isVersionKey = (key: unknown): key is string => typeof key === "string" && key.startsWith(`snapshots/${documentName}/`);
+      const readVersion = async (key: string) => {
+        const old = new Y.Doc();
+        Y.applyUpdate(old, await deps.blobs.get(key));
+        return old.getText(TEXT_NAME).toDelta() as Segment[];
+      };
       let message: ClientMessage;
       try {
         message = JSON.parse(payload) as ClientMessage;
@@ -206,28 +223,33 @@ export function createRealtimeServer(deps: RealtimeDeps) {
         return;
       }
       try {
-        if (message.type === "enregistrer") {
+        if (message.type === "apercu") {
+          if (!isVersionKey(message.snapshotKey)) {
+            reply({ type: "erreur", message: "version inconnue" });
+            return;
+          }
+          reply({ type: "apercu", snapshotKey: message.snapshotKey, delta: await readVersion(message.snapshotKey) });
+        } else if (message.type === "enregistrer") {
           const seq = entry.committer.seq; // état et séquence lus ensemble, sans await
           const state = Y.encodeStateAsUpdate(document);
           const label = String(message.label ?? "").trim().slice(0, 80) || "Version sans nom";
           await saveSnapshot(deps.db, deps.blobs, documentName, seq, state, now(), { label, author: writer });
           reply({ type: "version-enregistree", seq, label });
         } else if (message.type === "restaurer") {
-          if (typeof message.snapshotKey !== "string" || !message.snapshotKey.startsWith(`snapshots/${documentName}/`)) {
+          if (!isVersionKey(message.snapshotKey)) {
             reply({ type: "erreur", message: "version inconnue" });
             return;
           }
-          const old = new Y.Doc();
-          Y.applyUpdate(old, await deps.blobs.get(message.snapshotKey));
-          const content = old.getText(TEXT_NAME).toString();
-          // Copie de travail de l'état actuel : on y remplace le texte et on capture l'update.
+          const content = await readVersion(message.snapshotKey);
+          // Copie de travail de l'état actuel : on y remplace le texte (avec sa mise en
+          // forme) et on capture l'update.
           const work = new Y.Doc();
           Y.applyUpdate(work, Y.encodeStateAsUpdate(document));
           const before = Y.encodeStateVector(work);
           const text = work.getText(TEXT_NAME);
           work.transact(() => {
             text.delete(0, text.length);
-            text.insert(0, content);
+            text.applyDelta(content);
           });
           const seq = await entry.committer.submit(Y.encodeStateAsUpdate(work, before), writer, 0);
           reply({ type: "restauree", seq });
@@ -278,10 +300,27 @@ export function createRealtimeServer(deps: RealtimeDeps) {
   };
   setInterval(() => beat().catch((error: unknown) => deps.log?.error({ error }, "battement de présence")), PRESENCE_INTERVAL_MS).unref();
 
-  /** Texte et séquence d'un document ouvert, lus ensemble de façon synchrone (PDF, C3). */
+  let elu = performance.eventLoopUtilization();
+  setInterval(() => {
+    const current = performance.eventLoopUtilization();
+    const utilization = performance.eventLoopUtilization(current, elu).utilization;
+    elu = current;
+    const sorted = latencies.sort((a, b) => a - b);
+    latencies = [];
+    if (sorted.length === 0) return;
+    const at = (p: number) => Math.round(sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))]!);
+    deps.log?.info(
+      { modifications: sorted.length, p50: at(0.5), p95: at(0.95), max: at(1), boucle: Math.round(utilization * 100), documents: open.size },
+      "mesure confirmation",
+    );
+  }, MEASURE_INTERVAL_MS).unref();
+
+  /** Texte, mise en forme et séquence d'un document ouvert, lus ensemble de façon synchrone (PDF, C3). */
   const openState = (docId: string) => {
     const entry = open.get(docId);
-    return entry && { text: entry.doc.getText(TEXT_NAME).toString(), seq: entry.committer.seq };
+    if (!entry) return undefined;
+    const text = entry.doc.getText(TEXT_NAME);
+    return { text: text.toString(), delta: text.toDelta() as Segment[], seq: entry.committer.seq };
   };
 
   return { server, open, openState, beat };

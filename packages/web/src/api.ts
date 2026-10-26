@@ -38,6 +38,9 @@ export function errorText(error: unknown): string {
       "acces-refuse": "Vous n'êtes pas éditeur de ce document.",
       "document-inconnu": "Document introuvable.",
       "session-invalide": "Session expirée, reconnectez-vous.",
+      "titre-invalide": "Le titre ne peut pas être vide.",
+      "lien-actif-existant": "Ce document a déjà un lien actif : fermez-le avant d'en créer un autre.",
+      "lien-inconnu": "Lien introuvable.",
     }[code] ?? "Une erreur est survenue, réessayez."
   );
 }

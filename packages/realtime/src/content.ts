@@ -6,9 +6,12 @@
  * contenu déjà connu (resynchronisation) ne soit pas débité deux fois. Les
  * suppressions ne comptent pas.
  *
- * L'éditeur ne produit que du texte : tout autre contenu (objets, binaires,
- * sous-documents…) contournerait le décompte, l'update est donc refusé.
+ * L'éditeur produit du texte et des marques de mise en forme (Quill : attributs
+ * du Y.Text). Une marque ne compte pas de caractère ; seuls les formats de
+ * `FORMATS` sont admis. Tout autre contenu (objets, images, binaires,
+ * sous-documents…) contournerait le décompte ou le PDF : l'update est refusé.
  */
+import { isAllowedFormat } from "@editeur/shared";
 import * as Y from "yjs";
 
 export type UpdateAnalysis =
@@ -25,7 +28,9 @@ export function analyzeUpdate(update: Uint8Array, serverStateVector: Uint8Array)
     if (struct instanceof Y.GC) continue;
     const content = (struct as Y.Item).content;
     if (content instanceof Y.ContentString) chars += content.str.length;
-    else if (!(content instanceof Y.ContentDeleted)) return { valid: false };
+    else if (content instanceof Y.ContentFormat) {
+      if (!isAllowedFormat(content.key, content.value)) return { valid: false };
+    } else if (!(content instanceof Y.ContentDeleted)) return { valid: false };
   }
   // `diffUpdate` garde tout le jeu de suppressions : sans structure nouvelle ni
   // suppression, l'update n'apporte rien (premier échange d'un client neuf).

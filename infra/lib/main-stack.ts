@@ -35,7 +35,8 @@ const API_TABLE_ACTIONS: Partial<Record<TableKey, string[]>> = {
   documents: ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Scan"],
   // Lecture seule : affichage du crédit restant (seul le temps réel l'écrit).
   credits: ["dynamodb:GetItem"],
-  links: ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Query"],
+  // Scan : liens d'un document (filtré sur docId), affichés dans l'éditeur.
+  links: ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:Query", "dynamodb:Scan"],
   reservations: ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:UpdateItem"],
   blocks: ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Scan"],
   presence: ["dynamodb:Scan"],

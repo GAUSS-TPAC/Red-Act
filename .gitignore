@@ -1,6 +1,7 @@
 # Fichiers de travail locaux (non versionnés)
 CLAUDE.md
-docs/
+# Notes de travail d'Alan ; les livrables de docs/ (dossier, rapport, OpenAPI, coût) sont versionnés.
+docs/decisions-conception.md
 sujet projet stage.md
 ROADMAP.md
 

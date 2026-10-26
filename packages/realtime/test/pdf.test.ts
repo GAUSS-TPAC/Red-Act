@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { renderPdf } from "../src/pdf/render.ts";
+import { fontFor, renderPdf } from "../src/pdf/render.ts";
 import { pdfText } from "../../../tests/helpers/pdf.ts";
 import { PdfGenerator } from "../src/pdf/generator.ts";
 import { memoryBlobStore } from "../src/store.ts";
@@ -20,6 +20,35 @@ describe("renderPdf", () => {
     expect(text).toContain("Journal");
     expect(text).toContain("Version 7");
     expect(text).toContain("Éditorial : ça va");
+  });
+});
+
+describe("renderPdf — mise en forme", () => {
+  it("polices standard selon le format (gras, italique, police, taille) et soulignement", async () => {
+    expect(fontFor({})).toEqual({ font: "Helvetica", size: 11, underline: false });
+    expect(fontFor({ bold: true, italic: true, font: "serif", size: "huge", underline: true })).toEqual({
+      font: "Times-BoldItalic",
+      size: 27.5,
+      underline: true,
+    });
+    expect(fontFor({ italic: true, font: "monospace", size: "small" })).toEqual({ font: "Courier-Oblique", size: 8.25, underline: false });
+    const pdf = await renderPdf(
+      {
+        title: "Journal",
+        text: "Gros titre et corps",
+        delta: [
+          { insert: "Gros titre", attributes: { bold: true, size: "huge" } },
+          { insert: " et corps", attributes: { font: "serif", underline: true } },
+        ],
+        seq: 3,
+        generatedAt: Date.UTC(2026, 9, 26),
+      },
+      { compress: false },
+    );
+    const raw = Buffer.from(pdf).toString("latin1");
+    expect(raw).toContain("/BaseFont /Helvetica-Bold");
+    expect(raw).toContain("/BaseFont /Times-Roman");
+    expect(pdfText(pdf)).toContain("Gros titre");
   });
 });
 

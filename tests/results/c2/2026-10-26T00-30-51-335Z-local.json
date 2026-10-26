@@ -1,0 +1,60 @@
+{
+  "target": "local",
+  "startedAt": "2026-10-26T00:30:51.661Z",
+  "docId": "23e048ea-46c9-4e92-a8b4-af34b85f4973",
+  "clients": 20,
+  "ratePerClient": 8,
+  "flushDelayMs": 200,
+  "durationS": 20,
+  "sent": 3180,
+  "confirmed": 3180,
+  "refusals": 0,
+  "disconnects": 0,
+  "settleMs": 325,
+  "latencyWindows": [
+    {
+      "fromS": 0,
+      "count": 780,
+      "p50": 251,
+      "p95": 363,
+      "max": 394
+    },
+    {
+      "fromS": 5,
+      "count": 800,
+      "p50": 291,
+      "p95": 421,
+      "max": 548
+    },
+    {
+      "fromS": 10,
+      "count": 800,
+      "p50": 213,
+      "p95": 334,
+      "max": 348
+    },
+    {
+      "fromS": 15,
+      "count": 800,
+      "p50": 224,
+      "p95": 338,
+      "max": 359
+    }
+  ],
+  "latencyTrend": {
+    "firstThirdP95": 363,
+    "lastThirdP95": 338,
+    "growing": false
+  },
+  "convergence": {
+    "clients": 20,
+    "length": 3180,
+    "identicalTexts": true,
+    "identicalStateVectors": true,
+    "persistedMatches": true,
+    "ackedSeqs": 159,
+    "missingAckedSeqs": [],
+    "journalSeq": 159
+  },
+  "ok": true
+}

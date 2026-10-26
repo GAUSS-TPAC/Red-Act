@@ -11,7 +11,7 @@
  */
 import { ConditionalCheckFailedException } from "@aws-sdk/client-dynamodb";
 import { GetCommand, UpdateCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
-import { pdfKey, TABLES, TEXT_NAME, type DocumentItem } from "@editeur/shared";
+import { pdfKey, TABLES, TEXT_NAME, type DocumentItem, type Segment } from "@editeur/shared";
 import { loadDocument, type BlobStore } from "../store.ts";
 import type { RenderInput } from "./render.ts";
 
@@ -20,7 +20,7 @@ export interface PdfGeneratorDeps {
   blobs: BlobStore;
   render: (input: RenderInput) => Promise<Uint8Array>;
   /** Texte et séquence d'un document ouvert, lus de façon synchrone (undefined sinon). */
-  openState: (docId: string) => { text: string; seq: number } | undefined;
+  openState: (docId: string) => { text: string; delta?: Segment[]; seq: number } | undefined;
   now?: () => number;
   log?: { info: (obj: unknown, msg: string) => void };
 }
@@ -74,12 +74,16 @@ export class PdfGenerator {
     if (!state) {
       const loaded = await loadDocument(this.deps.db, this.deps.blobs, docId);
       if (!loaded) throw new Error(`document inconnu : ${docId}`);
-      state = { text: loaded.doc.getText(TEXT_NAME).toString(), seq: loaded.seq };
+      state = {
+        text: loaded.doc.getText(TEXT_NAME).toString(),
+        delta: loaded.doc.getText(TEXT_NAME).toDelta() as Segment[],
+        seq: loaded.seq,
+      };
     }
     if (item.pdfSeq >= state.seq) return item.pdfSeq;
 
     const generatedAt = this.now();
-    const pdf = await this.deps.render({ title: item.title, text: state.text, seq: state.seq, generatedAt });
+    const pdf = await this.deps.render({ title: item.title, text: state.text, delta: state.delta, seq: state.seq, generatedAt });
     this.renders++;
     await this.deps.blobs.put(pdfKey(docId, state.seq), pdf, "application/pdf");
     try {

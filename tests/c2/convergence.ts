@@ -3,7 +3,7 @@ import { QueryCommand, type DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb
 import { TABLES, TEXT_NAME } from "@editeur/shared";
 import * as Y from "yjs";
 import { loadDocument, type BlobStore } from "../../packages/realtime/src/store.ts";
-import { stateVector, type TestWriter } from "../helpers/realtime.ts";
+import { stateVector, waitFor, type TestWriter } from "../helpers/realtime.ts";
 
 export interface ConvergenceReport {
   clients: number;
@@ -25,7 +25,15 @@ export async function checkConvergence(
   blobs: BlobStore,
   docId: string,
   clients: TestWriter[],
+  /** Délai laissé aux dernières diffusions (la confirmation d'un client précède la diffusion aux autres). */
+  settleMs = 60_000,
 ): Promise<ConvergenceReport> {
+  // Un client a sa confirmation (message à part) un instant avant que sa modification
+  // n'atteigne les autres copies : comparer tout de suite donnerait une fausse
+  // divergence. On attend que les vecteurs d'état coïncident ; une vraie divergence
+  // reste visible à l'expiration du délai.
+  const same = () => clients.every((c) => JSON.stringify(stateVector(c.doc)) === JSON.stringify(stateVector(clients[0]!.doc)));
+  await waitFor(same, settleMs, "diffusion des dernières modifications").catch(() => undefined);
   const texts = clients.map((c) => c.text.toString());
   const vectors = clients.map((c) => JSON.stringify(stateVector(c.doc)));
   const persisted = (await loadDocument(db, blobs, docId))!;

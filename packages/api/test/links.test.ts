@@ -108,9 +108,10 @@ describe.skipIf(!dbUp)("liens et clics (DynamoDB Local)", () => {
 
       expect((await share(auth, " Invite@Test.local")).json()).toEqual({ docId, email: "invite@test.local" });
       const invite = { authorization: `Bearer ${await session("invite@test.local")}` };
-      // L'invité est éditeur : il peut créer un lien et partager à son tour.
+      // L'invité est éditeur : il passe le contrôle des droits (le document a déjà son
+      // lien actif, d'où 409 et non 403) et peut partager à son tour.
       const link = await app.inject({ method: "POST", url: `/api/documents/${docId}/links`, headers: invite, payload: { max: 1 } });
-      expect(link.statusCode).toBe(201);
+      expect(link.statusCode).toBe(409);
       expect((await share(invite, "troisieme@test.local")).statusCode).toBe(200);
 
       const intrus = { authorization: `Bearer ${await session("intrus@test.local")}` };
@@ -268,5 +269,74 @@ describe.skipIf(!dbUp)("liens et clics (DynamoDB Local)", () => {
       expect((await claim(linkId, ticket)).statusCode).toBe(410);
       clock -= 121_000;
     });
+  });
+});
+
+describe.skipIf(!dbUp)("un seul lien actif par document, fermeture, renommage (DynamoDB Local)", () => {
+  const clock = Date.parse("2026-11-02T10:00:00Z");
+  const { app } = createLocalApi(() => clock);
+  const db = createDocumentClient(LOCAL_ENDPOINT);
+  beforeAll(() => ensureLocalTables());
+  afterAll(() => app.close());
+
+  const newDoc = async () => {
+    const token = (await app.inject({ method: "POST", url: "/api/session", payload: { name: "A", email: "unique@test.local" } })).json().token;
+    const auth = { authorization: `Bearer ${token}` };
+    const { docId } = (await app.inject({ method: "POST", url: "/api/documents", headers: auth, payload: { title: "Avant" } })).json();
+    const create = (max: number) => app.inject({ method: "POST", url: `/api/documents/${docId}/links`, headers: auth, payload: { max } });
+    const list = async () => (await app.inject({ method: "GET", url: `/api/documents/${docId}/links`, headers: auth })).json().links;
+    return { docId, auth, create, list };
+  };
+  const claim = (linkId: string) => app.inject({ method: "POST", url: `/api/links/${linkId}/claim` });
+
+  it("deux créations simultanées : un seul lien ; le second voit le lien existant (409)", async () => {
+    const { create, list } = await newDoc();
+    const [a, b] = await Promise.all([create(5), create(5)]);
+    expect([a.statusCode, b.statusCode].sort()).toEqual([201, 409]);
+    const refused = a.statusCode === 409 ? a : b;
+    expect(refused.json()).toMatchObject({ erreur: "lien-actif-existant", lien: { max: 5, remaining: 5, status: "actif" } });
+    expect(await list()).toHaveLength(1);
+  });
+
+  it("le compteur affiché décroît à chaque téléchargement ; un lien épuisé libère la place", async () => {
+    const { create, list } = await newDoc();
+    const { linkId } = (await create(2)).json();
+    await claim(linkId);
+    expect((await list())[0]).toMatchObject({ remaining: 1, served: 1, status: "actif" });
+    await claim(linkId);
+    expect((await list())[0]).toMatchObject({ remaining: 0, served: 2, status: "epuise" });
+    const next = await create(3); // pointeur libéré à la création (le clic ne touche pas au document)
+    expect(next.statusCode).toBe(201);
+    expect(await list()).toHaveLength(2);
+  });
+
+  it("fermer un lien : clics suivants en 410, réservations faites conservées, nouveau lien possible", async () => {
+    const { auth, create, list } = await newDoc();
+    const { linkId } = (await create(10)).json();
+    expect((await claim(linkId)).statusCode).toBeLessThan(300);
+    const closed = await app.inject({ method: "POST", url: `/api/links/${linkId}/close`, headers: auth });
+    expect(closed.json()).toMatchObject({ status: "ferme", remaining: 0, served: 1, max: 10 });
+    expect((await claim(linkId)).statusCode).toBe(410);
+    const state = await dbState(db, linkId);
+    expect(state.remaining).toBe(0);
+    expect(state.reservations).toBe(1);
+    expect((await create(4)).statusCode).toBe(201);
+    expect((await list()).map((l: { status: string }) => l.status)).toEqual(["actif", "ferme"]);
+  });
+
+  it("un non-éditeur ne peut ni fermer ni renommer", async () => {
+    const { docId, create } = await newDoc();
+    const { linkId } = (await create(1)).json();
+    const intrus = { authorization: `Bearer ${(await app.inject({ method: "POST", url: "/api/session", payload: { name: "I", email: "intrus2@test.local" } })).json().token}` };
+    expect((await app.inject({ method: "POST", url: `/api/links/${linkId}/close`, headers: intrus })).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: `/api/documents/${docId}/title`, headers: intrus, payload: { title: "Pirate" } })).statusCode).toBe(403);
+  });
+
+  it("renommer un document", async () => {
+    const { docId, auth } = await newDoc();
+    const renamed = await app.inject({ method: "POST", url: `/api/documents/${docId}/title`, headers: auth, payload: { title: "  Numéro de novembre " } });
+    expect(renamed.json()).toEqual({ docId, title: "Numéro de novembre" });
+    expect((await app.inject({ method: "GET", url: `/api/documents/${docId}`, headers: auth })).json().title).toBe("Numéro de novembre");
+    expect((await app.inject({ method: "POST", url: `/api/documents/${docId}/title`, headers: auth, payload: { title: "   " } })).statusCode).toBe(400);
   });
 });

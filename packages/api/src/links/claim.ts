@@ -76,7 +76,7 @@ export class ClaimService {
     const link = (await this.deps.db.send(new GetCommand({ TableName: TABLES.links.tableName, Key: { linkId } })))
       .Item as LinkItem | undefined;
     if (!link) return { kind: "inconnu" };
-    if (link.status === "epuise") {
+    if (link.status === "epuise" || link.status === "ferme") {
       this.exhausted.add(linkId);
       return { kind: "epuise" };
     }
@@ -84,7 +84,10 @@ export class ClaimService {
       return {
         kind: "pas-ouvert",
         opensAt: link.opensAt,
-        retryAfter: Math.max(1, Math.min(60, Math.ceil((link.opensAt - now) / 1000))),
+        // Au moins 5 s, avec une part aléatoire : les visiteurs arrivés en avance ne
+        // reviennent pas tous à la même seconde, et une adresse partagée (NAT d'un
+        // campus) ne franchit pas le seuil anti-abus juste avant l'ouverture.
+        retryAfter: Math.max(5, Math.min(60, Math.ceil((link.opensAt - now) / 1000))) + Math.floor(Math.random() * 3),
       };
     }
 

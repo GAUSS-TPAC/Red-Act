@@ -12,6 +12,8 @@ export interface DocumentItem {
   pdfSeq: number;
   snapshotSeq: number;
   snapshotKey?: string;
+  /** Lien de téléchargement en cours : un seul à la fois par document. */
+  activeLinkId?: string;
 }
 
 export interface JournalItem {
@@ -31,7 +33,8 @@ export interface CreditItem {
   ttl: number;
 }
 
-export type LinkStatus = "actif" | "epuise";
+/** « ferme » : arrêté par un rédacteur avant épuisement (stock remis à 0). */
+export type LinkStatus = "actif" | "epuise" | "ferme";
 
 export interface LinkItem {
   linkId: string;
@@ -44,6 +47,8 @@ export interface LinkItem {
   /** Présent seulement si le lien est actif (index creux). */
   activeFlag?: string;
   createdAt: number;
+  /** Exemplaires non distribués au moment de la fermeture (servis = max − remaining − ce nombre). */
+  closedRemaining?: number;
 }
 
 export interface ReservationItem {

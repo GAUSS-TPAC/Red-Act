@@ -56,12 +56,19 @@ export class TestWriter {
   /** Autres messages du serveur (versions, erreurs). */
   readonly messages: ServerMessage[] = [];
   closedReason: string | undefined;
-  private readonly sentAt: number[] = [];
+  /** Heures des modifications locales pas encore parties. */
+  private readonly unsent: number[] = [];
+  /** Un groupe par message « update » envoyé (une modification, ou plusieurs si regroupées). */
+  private readonly sentGroups: number[][] = [];
 
-  /** `token` : jeton de session (testToken en local, POST /api/session sur AWS). */
-  constructor(url: string, docId: string, token: string) {
+  /**
+   * `token` : jeton de session (testToken en local, POST /api/session sur AWS).
+   * `flushDelay` : regroupement côté client, comme l'éditeur (CLAUDE.md §5) ; le retard
+   * de confirmation reste mesuré par frappe, depuis la frappe elle-même.
+   */
+  constructor(url: string, docId: string, token: string, options: { flushDelay?: number } = {}) {
     this.doc.on("update", (_update: Uint8Array, origin: unknown) => {
-      if (origin !== this.provider) this.sentAt.push(performance.now());
+      if (origin !== this.provider) this.unsent.push(performance.now());
     });
     this.socket = new HocuspocusProviderWebsocket({ url, WebSocketPolyfill: WebSocket });
     this.provider = new HocuspocusProvider({
@@ -69,12 +76,18 @@ export class TestWriter {
       name: docId,
       document: this.doc,
       token,
+      flushDelay: options.flushDelay ?? false,
+      // Le serveur confirme chaque message « update » : on rattache à chaque message
+      // les frappes qu'il emporte.
+      onOutgoingMessage: ({ message }) => {
+        if (message.description === "A document update" && this.unsent.length > 0) this.sentGroups.push(this.unsent.splice(0));
+      },
       onStateless: ({ payload }) => {
         const message = JSON.parse(payload) as ServerMessage;
         if (message.type === "ack") {
           this.acks.push(message.seq);
-          const sentAt = this.sentAt.shift();
-          if (sentAt !== undefined) this.confirmations.push({ sentAt, ms: performance.now() - sentAt });
+          const now = performance.now();
+          for (const sentAt of this.sentGroups.shift() ?? []) this.confirmations.push({ sentAt, ms: now - sentAt });
         } else if (message.type === "refus") {
           this.refusal = message;
         } else {

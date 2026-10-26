@@ -1,0 +1,116 @@
+{
+  "target": "aws",
+  "startedAt": "2026-10-26T00:35:37.931Z",
+  "docId": "495dd71d-8dec-474c-a850-1d6e522251cc",
+  "clients": 20,
+  "ratePerClient": 8,
+  "flushDelayMs": 0,
+  "durationS": 60,
+  "sent": 9547,
+  "confirmed": 9547,
+  "refusals": 0,
+  "disconnects": 0,
+  "settleMs": 5114,
+  "latencyWindows": [
+    {
+      "fromS": 0,
+      "count": 780,
+      "p50": 567,
+      "p95": 904,
+      "max": 1474
+    },
+    {
+      "fromS": 5,
+      "count": 800,
+      "p50": 1054,
+      "p95": 1646,
+      "max": 1999
+    },
+    {
+      "fromS": 10,
+      "count": 800,
+      "p50": 927,
+      "p95": 1944,
+      "max": 2772
+    },
+    {
+      "fromS": 15,
+      "count": 800,
+      "p50": 829,
+      "p95": 2747,
+      "max": 3033
+    },
+    {
+      "fromS": 20,
+      "count": 785,
+      "p50": 1439,
+      "p95": 2086,
+      "max": 2711
+    },
+    {
+      "fromS": 25,
+      "count": 800,
+      "p50": 1546,
+      "p95": 2688,
+      "max": 3284
+    },
+    {
+      "fromS": 30,
+      "count": 795,
+      "p50": 958,
+      "p95": 1749,
+      "max": 2473
+    },
+    {
+      "fromS": 35,
+      "count": 800,
+      "p50": 484,
+      "p95": 803,
+      "max": 913
+    },
+    {
+      "fromS": 40,
+      "count": 800,
+      "p50": 1083,
+      "p95": 1690,
+      "max": 2477
+    },
+    {
+      "fromS": 45,
+      "count": 797,
+      "p50": 970,
+      "p95": 1985,
+      "max": 2686
+    },
+    {
+      "fromS": 50,
+      "count": 790,
+      "p50": 774,
+      "p95": 1209,
+      "max": 2412
+    },
+    {
+      "fromS": 55,
+      "count": 797,
+      "p50": 1416,
+      "p95": 2530,
+      "max": 5202
+    }
+  ],
+  "latencyTrend": {
+    "firstThirdP95": 1810,
+    "lastThirdP95": 1854,
+    "growing": false
+  },
+  "convergence": {
+    "clients": 20,
+    "length": 9547,
+    "identicalTexts": true,
+    "identicalStateVectors": true,
+    "persistedMatches": true,
+    "ackedSeqs": 562,
+    "missingAckedSeqs": [],
+    "journalSeq": 562
+  },
+  "ok": true
+}

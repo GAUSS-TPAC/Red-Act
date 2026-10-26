@@ -1,0 +1,20 @@
+{
+  "target": "aws",
+  "startedAt": "2026-10-26T00:46:05.971Z",
+  "docId": "62d67486-01ee-458c-9776-9f6a30c5193f",
+  "preparation": {
+    "status": 200,
+    "ms": 488
+  },
+  "clic": {
+    "premierStatut": 202,
+    "rappels": 1,
+    "msJusqua200": 3950,
+    "lastAck": 2,
+    "pdfSeq": 3,
+    "taille": 1727,
+    "header": "%PDF-",
+    "subject": "3"
+  },
+  "ok": true
+}

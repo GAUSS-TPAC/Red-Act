@@ -61,6 +61,40 @@ describe.skipIf(!dbUp)("versions (DynamoDB Local)", () => {
     expect(await credit()).toBe(usedBefore);
   });
 
+  it("aperçu puis restauration d'une version mise en forme : formats conservés", async () => {
+    const email = `f-${Date.now()}@versions.local`;
+    const docId = await createDocument(db, [email]);
+    const w = new TestWriter(rt.url, docId, testToken(email));
+    writers.push(w);
+    await w.synced();
+
+    w.text.insert(0, "Titre", { bold: true, size: "large" });
+    w.text.insert(5, " corps", { font: "serif" });
+    await w.idle();
+    w.provider.sendStateless(JSON.stringify({ type: "enregistrer", label: "Mise en forme" }));
+    await waitFor(() => w.messages.some((m) => m.type === "version-enregistree"), 5_000, "version enregistrée");
+    const named = (
+      await db.send(new QueryCommand({ TableName: TABLES.versions.tableName, KeyConditionExpression: "docId = :d", ExpressionAttributeValues: { ":d": docId } }))
+    ).Items!.find((v) => v.label === "Mise en forme")!;
+    const expected = [
+      { insert: "Titre", attributes: { bold: true, size: "large" } },
+      { insert: " corps", attributes: { font: "serif" } },
+    ];
+
+    w.provider.sendStateless(JSON.stringify({ type: "apercu", snapshotKey: named.snapshotKey }));
+    await waitFor(() => w.messages.some((m) => m.type === "apercu"), 5_000, "aperçu");
+    expect(w.messages.find((m) => m.type === "apercu")).toEqual({ type: "apercu", snapshotKey: named.snapshotKey, delta: expected });
+
+    w.text.delete(0, w.text.length);
+    w.text.insert(0, "autre chose");
+    await w.idle();
+    w.provider.sendStateless(JSON.stringify({ type: "restaurer", snapshotKey: named.snapshotKey }));
+    await waitFor(() => w.messages.some((m) => m.type === "restauree"), 5_000, "restauration");
+    await waitFor(() => w.text.toString() === "Titre corps", 5_000, "diffusion");
+    expect(w.text.toDelta()).toEqual(expected);
+    expect((await loadDocument(db, rt.blobs, docId))!.doc.getText(TEXT_NAME).toDelta()).toEqual(expected);
+  });
+
   it("refuse de restaurer l'instantané d'un autre document", async () => {
     const docId = await createDocument(db, ["x@versions.local"]);
     const w = new TestWriter(rt.url, docId, testToken("x@versions.local"));

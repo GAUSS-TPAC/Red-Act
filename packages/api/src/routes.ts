@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { ConditionalCheckFailedException } from "@aws-sdk/client-dynamodb";
+import { ConditionalCheckFailedException, TransactionCanceledException } from "@aws-sdk/client-dynamodb";
 import {
   GetCommand,
   PutCommand,
   QueryCommand,
   ScanCommand,
+  TransactWriteCommand,
   UpdateCommand,
   type DynamoDBDocumentClient,
 } from "@aws-sdk/lib-dynamodb";
@@ -18,6 +19,7 @@ import {
   normalizeEmail,
   TABLES,
   verifySessionToken,
+  verifyTicket,
   type DocumentItem,
   type LinkItem,
   type SessionClaims,
@@ -66,6 +68,24 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     const result = token ? verifySessionToken(token, deps.hmacSecret, Math.floor(now() / 1000)) : undefined;
     if (!result?.ok) return reply.code(401).send({ erreur: "session-invalide" });
     request.writer = { email: result.claims.email, name: result.claims.name };
+  };
+
+  /** Libère le pointeur de lien actif du document s'il désigne encore `linkId`. */
+  const releaseActiveLink = async (docId: string, linkId: string | undefined) => {
+    if (!linkId) return;
+    await deps.db
+      .send(
+        new UpdateCommand({
+          TableName: TABLES.documents.tableName,
+          Key: { docId },
+          UpdateExpression: "REMOVE activeLinkId",
+          ConditionExpression: "activeLinkId = :id",
+          ExpressionAttributeValues: { ":id": linkId },
+        }),
+      )
+      .catch((error: unknown) => {
+        if (!(error instanceof ConditionalCheckFailedException)) throw error;
+      });
   };
 
   // --- Session : un nom et un e-mail suffisent (pas de vrais comptes).
@@ -176,6 +196,73 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
       if (!doc) return reply.code(404).send({ erreur: "document-inconnu" });
       if (!doc.editors.has(request.writer!.email)) return reply.code(403).send({ erreur: "acces-refuse" });
       return { docId: doc.docId, title: doc.title, ownerEmail: doc.ownerEmail, editors: [...doc.editors].sort(), seq: doc.seq };
+    },
+  );
+
+  // Renommer : tout éditeur, en une écriture conditionnelle (droits vérifiés par DynamoDB).
+  app.post<{ Params: { docId: string }; Body: { title: string } }>(
+    "/api/documents/:docId/title",
+    {
+      preHandler: authenticate,
+      schema: {
+        params: docParams,
+        body: {
+          type: "object",
+          required: ["title"],
+          additionalProperties: false,
+          properties: { title: { type: "string", minLength: 1, maxLength: 200 } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const title = request.body.title.trim();
+      if (!title) return reply.code(400).send({ erreur: "titre-invalide" });
+      try {
+        await deps.db.send(
+          new UpdateCommand({
+            TableName: TABLES.documents.tableName,
+            Key: { docId: request.params.docId },
+            UpdateExpression: "SET title = :t",
+            ConditionExpression: "attribute_exists(docId) AND contains(editors, :moi)",
+            ExpressionAttributeValues: { ":t": title, ":moi": request.writer!.email },
+          }),
+        );
+      } catch (error) {
+        if (!(error instanceof ConditionalCheckFailedException)) throw error;
+        return (await readDocument(request.params.docId))
+          ? reply.code(403).send({ erreur: "acces-refuse" })
+          : reply.code(404).send({ erreur: "document-inconnu" });
+      }
+      return { docId: request.params.docId, title };
+    },
+  );
+
+  // Liens du document, l'actif puis les plus récents, avec les exemplaires restants (affichage).
+  // Scan filtré, comme la liste des documents : quelques liens par document.
+  app.get<{ Params: { docId: string } }>(
+    "/api/documents/:docId/links",
+    { preHandler: authenticate, schema: { params: docParams } },
+    async (request, reply) => {
+      const doc = await readDocument(request.params.docId);
+      if (!doc) return reply.code(404).send({ erreur: "document-inconnu" });
+      if (!doc.editors.has(request.writer!.email)) return reply.code(403).send({ erreur: "acces-refuse" });
+      const items: LinkItem[] = [];
+      let ExclusiveStartKey: Record<string, unknown> | undefined;
+      do {
+        const page = await deps.db.send(
+          new ScanCommand({
+            TableName: TABLES.links.tableName,
+            FilterExpression: "docId = :d",
+            ExpressionAttributeValues: { ":d": request.params.docId },
+            ConsistentRead: true,
+            ExclusiveStartKey,
+          }),
+        );
+        items.push(...((page.Items ?? []) as LinkItem[]));
+        ExclusiveStartKey = page.LastEvaluatedKey;
+      } while (ExclusiveStartKey);
+      const active = (l: LinkItem) => Number(l.status === "actif");
+      return { links: items.sort((a, b) => active(b) - active(a) || b.createdAt - a.createdAt).map(linkView) };
     },
   );
 
@@ -317,13 +404,45 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
         createdAt: now(),
         ...(request.body.opensAt ? { opensAt: Date.parse(request.body.opensAt) } : {}),
       };
-      await deps.db.send(
-        new PutCommand({
-          TableName: TABLES.links.tableName,
-          Item: link,
-          ConditionExpression: "attribute_not_exists(linkId)",
-        }),
-      );
+      // Un seul lien actif par document (décision d'Alan) : le lien et le pointeur
+      // `activeLinkId` du document sont écrits ensemble, à condition qu'aucun lien ne
+      // soit en cours. Deux créations simultanées → une seule réussit.
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await deps.db.send(
+            new TransactWriteCommand({
+              TransactItems: [
+                { Put: { TableName: TABLES.links.tableName, Item: link, ConditionExpression: "attribute_not_exists(linkId)" } },
+                {
+                  Update: {
+                    TableName: TABLES.documents.tableName,
+                    Key: { docId: link.docId },
+                    UpdateExpression: "SET activeLinkId = :id",
+                    ConditionExpression: "attribute_not_exists(activeLinkId)",
+                    ExpressionAttributeValues: { ":id": link.linkId },
+                  },
+                },
+              ],
+            }),
+          );
+          break;
+        } catch (error) {
+          if (!(error instanceof TransactionCanceledException) || attempt > 0) throw error;
+          if (error.CancellationReasons?.[1]?.Code !== "ConditionalCheckFailed") throw error;
+          // Le pointeur peut désigner un lien épuisé (le clic qui prend le dernier
+          // exemplaire ne touche pas au document, pour rester minimal) : on le libère.
+          const current = (await deps.db.send(new GetCommand({ TableName: TABLES.documents.tableName, Key: { docId: link.docId }, ConsistentRead: true })))
+            .Item as DocumentItem | undefined;
+          const active = current?.activeLinkId
+            ? ((await deps.db.send(new GetCommand({ TableName: TABLES.links.tableName, Key: { linkId: current.activeLinkId }, ConsistentRead: true })))
+                .Item as LinkItem | undefined)
+            : undefined;
+          if (active && active.status === "actif" && active.remaining > 0) {
+            return reply.code(409).send({ erreur: "lien-actif-existant", lien: linkView(active) });
+          }
+          await releaseActiveLink(link.docId, current?.activeLinkId);
+        }
+      }
       // Pic annoncé : instances API montées 10 min avant l'ouverture (échec non bloquant).
       if (link.opensAt !== undefined) {
         await deps.scheduleScaling?.(link.linkId, link.opensAt).catch((error: unknown) =>
@@ -343,14 +462,56 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     },
   );
 
+  // --- Fermer un lien avant épuisement : stock remis à 0 (les clics suivants reçoivent
+  // 410), réservations déjà faites honorées, document libre pour un nouveau lien.
+  app.post<{ Params: { linkId: string } }>(
+    "/api/links/:linkId/close",
+    { preHandler: authenticate, schema: { params: { type: "object", properties: { linkId: { type: "string", pattern: ID_PATTERN } } } } },
+    async (request, reply) => {
+      const link = (await deps.db.send(new GetCommand({ TableName: TABLES.links.tableName, Key: { linkId: request.params.linkId } })))
+        .Item as LinkItem | undefined;
+      if (!link) return reply.code(404).send({ erreur: "lien-inconnu" });
+      const doc = await readDocument(link.docId);
+      if (!doc?.editors.has(request.writer!.email)) return reply.code(403).send({ erreur: "acces-refuse" });
+      let closed: LinkItem;
+      try {
+        closed = (
+          await deps.db.send(
+            new UpdateCommand({
+              TableName: TABLES.links.tableName,
+              Key: { linkId: link.linkId },
+              // `closedRemaining` reprend le stock lu dans la même écriture atomique.
+              UpdateExpression: "SET #status = :ferme, closedRemaining = remaining, remaining = :zero REMOVE activeFlag",
+              ConditionExpression: "#status = :actif",
+              ExpressionAttributeNames: { "#status": "status" },
+              ExpressionAttributeValues: { ":ferme": "ferme", ":actif": "actif", ":zero": 0 },
+              ReturnValues: "ALL_NEW",
+            }),
+          )
+        ).Attributes as LinkItem;
+      } catch (error) {
+        if (!(error instanceof ConditionalCheckFailedException)) throw error;
+        closed = (await deps.db.send(new GetCommand({ TableName: TABLES.links.tableName, Key: { linkId: link.linkId }, ConsistentRead: true })))
+          .Item as LinkItem;
+      }
+      await releaseActiveLink(link.docId, link.linkId);
+      return linkView(closed);
+    },
+  );
+
   // --- Clic sur un lien : 200 télécharger / 202 patienter / 410 épuisé.
   app.post<{ Params: { linkId: string } }>("/api/links/:linkId/claim", async (request, reply) => {
     reply.header("Cache-Control", "no-store");
     const { linkId } = request.params;
     if (!new RegExp(ID_PATTERN).test(linkId)) return reply.code(404).send({ etat: "inconnu" });
 
+    // Un visiteur qui a déjà réservé (ticket signé valide pour ce lien) revient chercher
+    // son PDF : ses rappels (202) ne comptent pas pour l'anti-abus.
+    const ticketToken = readCookie(request.headers.cookie, TICKET_COOKIE);
+    const ticket = ticketToken ? verifyTicket(ticketToken, deps.hmacSecret, Math.floor(now() / 1000)) : undefined;
+    const hasTicket = ticket?.ok === true && ticket.claims.linkId === linkId;
     const ip = viewerIp(request.headers["cloudfront-viewer-address"]);
-    const blockedUntil = ip ? deps.visitorGuard?.hit(ip) : undefined;
+    const blockedUntil = ip && !hasTicket ? deps.visitorGuard?.hit(ip) : undefined;
     if (blockedUntil !== undefined) {
       const retryAfter = Math.max(1, Math.ceil((blockedUntil - now()) / 1000));
       return reply
@@ -359,7 +520,7 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
         .send({ etat: "bloque", finLe: new Date(blockedUntil).toISOString(), retryAfter });
     }
 
-    const outcome = await deps.claims.claim(linkId, readCookie(request.headers.cookie, TICKET_COOKIE));
+    const outcome = await deps.claims.claim(linkId, ticketToken);
     if ("ticket" in outcome && outcome.ticket) {
       reply.header(
         "Set-Cookie",
@@ -368,6 +529,20 @@ export function registerRoutes(app: FastifyInstance, deps: RouteDeps) {
     }
     return sendOutcome(reply, outcome);
   });
+}
+
+/** Vue d'un lien pour le front : servis = réservations effectivement faites. */
+function linkView(link: LinkItem) {
+  const restants = link.status === "actif" ? link.remaining : 0;
+  return {
+    linkId: link.linkId,
+    max: link.max,
+    remaining: restants,
+    served: link.max - link.remaining - (link.closedRemaining ?? 0),
+    status: link.status,
+    opensAt: link.opensAt !== undefined ? new Date(link.opensAt).toISOString() : null,
+    createdAt: new Date(link.createdAt).toISOString(),
+  };
 }
 
 function sendOutcome(reply: FastifyReply, outcome: ClaimOutcome) {

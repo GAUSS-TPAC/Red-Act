@@ -6,7 +6,8 @@
  *   npm run test:c2                                   # local : serveur + DynamoDB Local
  *   npm run test:c2 -- --base-url https://xxx.cloudfront.net --bucket <BucketName>
  *
- * Options : --clients (20), --rate (8 car./s), --duration (60 s), --settle (600 s :
+ * Options : --clients (20), --rate (8 car./s), --duration (60 s), --flush-delay (0 ms :
+ * une frappe = un message ; 200 = regroupement de l'éditeur), --settle (600 s :
  * délai d'attente des confirmations, à allonger pour la variante « arrêt brutal »).
  * Variante arrêt brutal (AWS) : pendant la frappe, Alan termine l'instance temps réel ;
  * les clients se reconnectent seuls au nouveau serveur et renvoient ce qui n'a pas été
@@ -26,6 +27,8 @@ const { values } = parseArgs({
     rate: { type: "string", default: "8" },
     duration: { type: "string", default: "60" },
     settle: { type: "string", default: "600" },
+    // Regroupement côté client en ms (0 : une frappe = un message, le pire cas).
+    "flush-delay": { type: "string", default: "0" },
     "base-url": { type: "string" },
     bucket: { type: "string" },
   },
@@ -79,7 +82,8 @@ async function main() {
     stop = () => rt.server.destroy();
   }
 
-  const writers = tokens.map((token) => new TestWriter(url, docId, token));
+  const flushDelay = Number(values["flush-delay"]) || undefined;
+  const writers = tokens.map((token) => new TestWriter(url, docId, token, { flushDelay }));
   let disconnects = 0;
   for (const w of writers) w.provider.on("close", () => disconnects++);
   await Promise.all(writers.map((w) => w.synced(30_000)));
@@ -125,6 +129,7 @@ async function main() {
     docId,
     clients,
     ratePerClient: rate,
+    flushDelayMs: flushDelay ?? 0,
     durationS: durationMs / 1000,
     sent,
     confirmed: all.length,

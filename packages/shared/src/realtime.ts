@@ -4,6 +4,34 @@
 export const TEXT_NAME = "contenu";
 
 /**
+ * Mise en forme autorisée (éditeur Quill, attributs du Y.Text). Seuls ces formats
+ * en ligne existent : le serveur refuse tout autre attribut, et le PDF sait tous les
+ * reproduire avec les polices standard de pdfkit. `null`/`false` retirent un format.
+ *   font : sans empattement (défaut, Helvetica), « serif » (Times), « monospace » (Courier)
+ *   size : normale (défaut), « small », « large », « huge »
+ */
+export const FORMATS = {
+  bold: [true],
+  italic: [true],
+  underline: [true],
+  font: ["serif", "monospace"],
+  size: ["small", "large", "huge"],
+} as const satisfies Record<string, readonly unknown[]>;
+
+export type FormatName = keyof typeof FORMATS;
+
+export function isAllowedFormat(key: string, value: unknown): boolean {
+  if (!Object.hasOwn(FORMATS, key)) return false;
+  return value === null || value === false || (FORMATS[key as FormatName] as readonly unknown[]).includes(value);
+}
+
+/** Un morceau de texte et sa mise en forme (delta Yjs/Quill). */
+export interface Segment {
+  insert: string;
+  attributes?: Partial<Record<FormatName, unknown>>;
+}
+
+/**
  * Refus d'une modification : la connexion au document est fermée. Hocuspocus 4 ne
  * transmet au client que la raison de fermeture (pas de code WebSocket, la socket
  * peut porter plusieurs documents) : le code voyage dans un message « refus »
@@ -14,7 +42,7 @@ export const REFUSAL = {
   creditEpuise: { code: 4001, raison: "credit-epuise" },
   /** Rédacteur bloqué : pas de reconnexion avant `finLe`. */
   bloque: { code: 4003, raison: "bloque" },
-  /** Contenu autre que du texte (l'éditeur ne produit que du texte). */
+  /** Contenu autre que du texte mis en forme (formats de FORMATS uniquement). */
   contenuInvalide: { code: 4400, raison: "contenu-invalide" },
   /** Écriture impossible (DynamoDB indisponible) : rien n'a été accepté. */
   erreurServeur: { code: 4500, raison: "erreur-serveur" },
@@ -32,13 +60,17 @@ export type ServerMessage =
   | { type: "version-enregistree"; seq: number; label: string }
   /** Version restaurée : appliquée comme une nouvelle modification, écrite à `seq`. */
   | { type: "restauree"; seq: number }
+  /** Contenu d'une version, pour l'aperçu avant restauration. */
+  | { type: "apercu"; snapshotKey: string; delta: Segment[] }
   | { type: "erreur"; message: string };
 
 /** Messages « stateless » envoyés par le client (JSON). */
 export type ClientMessage =
   | { type: "enregistrer"; label: string }
   /** Restaurer = réappliquer le contenu de cet instantané (§5) ; ne consomme pas de crédit. */
-  | { type: "restaurer"; snapshotKey: string };
+  | { type: "restaurer"; snapshotKey: string }
+  /** Demande le contenu d'une version (lecture seule). */
+  | { type: "apercu"; snapshotKey: string };
 
 /** Clé S3 d'un instantané du document à la séquence `seq`. */
 export const snapshotKey = (docId: string, seq: number) => `snapshots/${docId}/${seq}.bin`;

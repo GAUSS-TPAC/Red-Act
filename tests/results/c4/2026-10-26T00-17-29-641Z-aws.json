@@ -1,0 +1,16 @@
+{
+  "target": "aws",
+  "variante": "3 appareils (2 sur A, 1 sur B), rafale 700 car./50 ms sans attendre",
+  "email": "c4-2026-10-26t00-17-29-641z@test.local",
+  "sentChars": 35700,
+  "acceptedA": 6300,
+  "acceptedB": 3500,
+  "totalAccepted": 9800,
+  "creditUsed": 9800,
+  "refusals": [
+    4001,
+    4001,
+    4001
+  ],
+  "ok": true
+}

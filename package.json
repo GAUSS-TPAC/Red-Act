@@ -20,6 +20,7 @@
     "test:c1": "node scripts/run-ts.mjs tests/c1/run-c1.ts",
     "test:c2": "node scripts/run-ts.mjs tests/c2/run-c2.ts",
     "test:c3": "node scripts/run-ts.mjs tests/c3/run-c3.ts",
+    "test:c4": "node scripts/run-ts.mjs tests/c4/run-c4.ts",
     "dev": "npm run build && node scripts/run-ts.mjs scripts/dev.ts"
   },
   "devDependencies": {

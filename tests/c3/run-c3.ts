@@ -54,7 +54,9 @@ async function main() {
   writer.insert(writer.text.length, "Ajout juste avant le clic.");
   await writer.idle();
   const lastAck = writer.acks.at(-1)!;
-  const linkB = (await post(base, `/api/documents/${docId}/links`, { max: 5 }, auth)).json;
+  // Même lien, créé AVANT la modification (un seul lien actif par document), cliqué par
+  // un nouveau visiteur : il doit obtenir l'état au moment du clic, pas à la création.
+  const linkB = linkA;
   writer.insert(writer.text.length, " Ajout après le clic.");
   const t1 = Date.now();
   let click = await post(base, linkB.claimPath, {});

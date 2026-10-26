@@ -1,0 +1,116 @@
+{
+  "target": "aws",
+  "startedAt": "2026-10-26T00:47:06.979Z",
+  "docId": "9e7f8a1e-f34e-4310-aa65-ef3351316527",
+  "clients": 20,
+  "ratePerClient": 8,
+  "flushDelayMs": 200,
+  "durationS": 60,
+  "sent": 9541,
+  "confirmed": 9541,
+  "refusals": 0,
+  "disconnects": 0,
+  "settleMs": 1447,
+  "latencyWindows": [
+    {
+      "fromS": 0,
+      "count": 780,
+      "p50": 660,
+      "p95": 1009,
+      "max": 1700
+    },
+    {
+      "fromS": 5,
+      "count": 800,
+      "p50": 690,
+      "p95": 1117,
+      "max": 1335
+    },
+    {
+      "fromS": 10,
+      "count": 800,
+      "p50": 592,
+      "p95": 861,
+      "max": 1355
+    },
+    {
+      "fromS": 15,
+      "count": 800,
+      "p50": 636,
+      "p95": 924,
+      "max": 1572
+    },
+    {
+      "fromS": 20,
+      "count": 800,
+      "p50": 525,
+      "p95": 625,
+      "max": 657
+    },
+    {
+      "fromS": 25,
+      "count": 796,
+      "p50": 685,
+      "p95": 1151,
+      "max": 1879
+    },
+    {
+      "fromS": 30,
+      "count": 784,
+      "p50": 929,
+      "p95": 1908,
+      "max": 2274
+    },
+    {
+      "fromS": 35,
+      "count": 800,
+      "p50": 709,
+      "p95": 1717,
+      "max": 2020
+    },
+    {
+      "fromS": 40,
+      "count": 800,
+      "p50": 613,
+      "p95": 1104,
+      "max": 1833
+    },
+    {
+      "fromS": 45,
+      "count": 800,
+      "p50": 714,
+      "p95": 1286,
+      "max": 1526
+    },
+    {
+      "fromS": 50,
+      "count": 800,
+      "p50": 637,
+      "p95": 1396,
+      "max": 1798
+    },
+    {
+      "fromS": 55,
+      "count": 781,
+      "p50": 695,
+      "p95": 1225,
+      "max": 1554
+    }
+  ],
+  "latencyTrend": {
+    "firstThirdP95": 978,
+    "lastThirdP95": 1253,
+    "growing": false
+  },
+  "convergence": {
+    "clients": 20,
+    "length": 9541,
+    "identicalTexts": true,
+    "identicalStateVectors": true,
+    "persistedMatches": true,
+    "ackedSeqs": 458,
+    "missingAckedSeqs": [],
+    "journalSeq": 458
+  },
+  "ok": true
+}

@@ -47,4 +47,29 @@ describe("analyzeUpdate", () => {
     const update = updateOf(client, () => client.getMap("autre").set("k", "x".repeat(50_000)));
     expect(analyzeUpdate(update, Y.encodeStateVector(new Y.Doc()))).toEqual({ valid: false });
   });
+
+  it("mise en forme admise (FORMATS) : aucun caractère débité", () => {
+    const client = new Y.Doc();
+    const server = new Y.Doc();
+    const text = client.getText(TEXT_NAME);
+    const insert = updateOf(client, () => text.insert(0, "Titre", { bold: true, size: "huge", font: "serif" }));
+    expect(analyzeUpdate(insert, Y.encodeStateVector(server))).toEqual({ valid: true, chars: 5, empty: false });
+    Y.applyUpdate(server, insert);
+    const format = updateOf(client, () => text.format(0, 5, { italic: true, underline: true, bold: null, font: "monospace" }));
+    expect(analyzeUpdate(format, Y.encodeStateVector(server))).toEqual({ valid: true, chars: 0, empty: false });
+  });
+
+  it("refuse un format inconnu ou une valeur hors liste (contournement du PDF ou du crédit)", () => {
+    for (const attributes of [{ color: "red" }, { size: "999px" }, { font: "Comic Sans" }, { bold: "oui" }, { link: "javascript:alert(1)" }]) {
+      const client = new Y.Doc();
+      const update = updateOf(client, () => client.getText(TEXT_NAME).insert(0, "x", attributes));
+      expect(analyzeUpdate(update, Y.encodeStateVector(new Y.Doc())), JSON.stringify(attributes)).toEqual({ valid: false });
+    }
+  });
+
+  it("refuse un objet inséré dans le texte (image, embed)", () => {
+    const client = new Y.Doc();
+    const update = updateOf(client, () => client.getText(TEXT_NAME).insertEmbed(0, { image: "x" }));
+    expect(analyzeUpdate(update, Y.encodeStateVector(new Y.Doc()))).toEqual({ valid: false });
+  });
 });

@@ -1,4 +1,5 @@
 // Front de l'éditeur partagé : un petit routeur sur l'URL, une page à la fois.
+import "quill/dist/quill.snow.css";
 import "./style.css";
 import { adminPage } from "./pages/admin.ts";
 import { downloadPage } from "./pages/download.ts";

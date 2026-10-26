@@ -1,0 +1,117 @@
+{
+  "target": "aws",
+  "startedAt": "2026-10-26T00:12:08.040Z",
+  "docId": "1bb455bb-8052-49d1-9fd4-dd150d73106f",
+  "clients": 20,
+  "ratePerClient": 8,
+  "durationS": 60,
+  "sent": 9552,
+  "confirmed": 9552,
+  "refusals": 0,
+  "disconnects": 0,
+  "settleMs": 976,
+  "diffusionMs": 2206,
+  "variante": "attente-diffusion",
+  "latencyWindows": [
+    {
+      "fromS": 0,
+      "count": 780,
+      "p50": 1113,
+      "p95": 1929,
+      "max": 2983
+    },
+    {
+      "fromS": 5,
+      "count": 800,
+      "p50": 753,
+      "p95": 1002,
+      "max": 1439
+    },
+    {
+      "fromS": 10,
+      "count": 800,
+      "p50": 894,
+      "p95": 1747,
+      "max": 2090
+    },
+    {
+      "fromS": 15,
+      "count": 799,
+      "p50": 992,
+      "p95": 1704,
+      "max": 2606
+    },
+    {
+      "fromS": 20,
+      "count": 792,
+      "p50": 376,
+      "p95": 499,
+      "max": 670
+    },
+    {
+      "fromS": 25,
+      "count": 800,
+      "p50": 727,
+      "p95": 1522,
+      "max": 2557
+    },
+    {
+      "fromS": 30,
+      "count": 794,
+      "p50": 936,
+      "p95": 1535,
+      "max": 1955
+    },
+    {
+      "fromS": 35,
+      "count": 799,
+      "p50": 439,
+      "p95": 728,
+      "max": 783
+    },
+    {
+      "fromS": 40,
+      "count": 800,
+      "p50": 1123,
+      "p95": 1666,
+      "max": 2071
+    },
+    {
+      "fromS": 45,
+      "count": 794,
+      "p50": 916,
+      "p95": 1556,
+      "max": 1880
+    },
+    {
+      "fromS": 50,
+      "count": 800,
+      "p50": 527,
+      "p95": 622,
+      "max": 698
+    },
+    {
+      "fromS": 55,
+      "count": 794,
+      "p50": 913,
+      "p95": 1520,
+      "max": 2078
+    }
+  ],
+  "latencyTrend": {
+    "firstThirdP95": 1596,
+    "lastThirdP95": 1341,
+    "growing": false
+  },
+  "convergence": {
+    "clients": 20,
+    "length": 9552,
+    "identicalTexts": true,
+    "identicalStateVectors": true,
+    "persistedMatches": true,
+    "ackedSeqs": 579,
+    "missingAckedSeqs": [],
+    "journalSeq": 579
+  },
+  "ok": true
+}

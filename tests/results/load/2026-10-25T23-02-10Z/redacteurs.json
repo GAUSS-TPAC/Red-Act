@@ -1,0 +1,430 @@
+{
+  "writers": 300,
+  "docs": 30,
+  "ratePerWriter": 2,
+  "durationS": 1128,
+  "sent": 578762,
+  "confirmed": 578762,
+  "refusals": 0,
+  "latencyWindows": [
+    {
+      "fromS": 0,
+      "count": 17700,
+      "p50": 132,
+      "p95": 245,
+      "max": 437
+    },
+    {
+      "fromS": 30,
+      "count": 18000,
+      "p50": 109,
+      "p95": 167,
+      "max": 287
+    },
+    {
+      "fromS": 60,
+      "count": 18000,
+      "p50": 93,
+      "p95": 148,
+      "max": 372
+    },
+    {
+      "fromS": 90,
+      "count": 17839,
+      "p50": 85,
+      "p95": 141,
+      "max": 452
+    },
+    {
+      "fromS": 120,
+      "count": 17728,
+      "p50": 88,
+      "p95": 154,
+      "max": 462
+    },
+    {
+      "fromS": 150,
+      "count": 17853,
+      "p50": 84,
+      "p95": 149,
+      "max": 662
+    },
+    {
+      "fromS": 180,
+      "count": 17681,
+      "p50": 91,
+      "p95": 151,
+      "max": 603
+    },
+    {
+      "fromS": 210,
+      "count": 17506,
+      "p50": 84,
+      "p95": 206,
+      "max": 877
+    },
+    {
+      "fromS": 240,
+      "count": 17546,
+      "p50": 84,
+      "p95": 141,
+      "max": 966
+    },
+    {
+      "fromS": 270,
+      "count": 17466,
+      "p50": 83,
+      "p95": 173,
+      "max": 1076
+    },
+    {
+      "fromS": 300,
+      "count": 17481,
+      "p50": 84,
+      "p95": 191,
+      "max": 1323
+    },
+    {
+      "fromS": 330,
+      "count": 17895,
+      "p50": 82,
+      "p95": 138,
+      "max": 365
+    },
+    {
+      "fromS": 360,
+      "count": 17322,
+      "p50": 87,
+      "p95": 213,
+      "max": 1564
+    },
+    {
+      "fromS": 390,
+      "count": 17148,
+      "p50": 86,
+      "p95": 200,
+      "max": 1508
+    },
+    {
+      "fromS": 420,
+      "count": 16997,
+      "p50": 86,
+      "p95": 209,
+      "max": 1795
+    },
+    {
+      "fromS": 450,
+      "count": 17906,
+      "p50": 85,
+      "p95": 182,
+      "max": 435
+    },
+    {
+      "fromS": 480,
+      "count": 16805,
+      "p50": 87,
+      "p95": 241,
+      "max": 1811
+    },
+    {
+      "fromS": 510,
+      "count": 17786,
+      "p50": 87,
+      "p95": 163,
+      "max": 483
+    },
+    {
+      "fromS": 540,
+      "count": 16527,
+      "p50": 88,
+      "p95": 233,
+      "max": 2180
+    },
+    {
+      "fromS": 570,
+      "count": 17026,
+      "p50": 93,
+      "p95": 302,
+      "max": 2482
+    },
+    {
+      "fromS": 600,
+      "count": 16697,
+      "p50": 96,
+      "p95": 226,
+      "max": 555
+    },
+    {
+      "fromS": 630,
+      "count": 15759,
+      "p50": 104,
+      "p95": 342,
+      "max": 2506
+    },
+    {
+      "fromS": 660,
+      "count": 16388,
+      "p50": 115,
+      "p95": 257,
+      "max": 626
+    },
+    {
+      "fromS": 690,
+      "count": 13936,
+      "p50": 142,
+      "p95": 365,
+      "max": 2719
+    },
+    {
+      "fromS": 720,
+      "count": 13607,
+      "p50": 146,
+      "p95": 419,
+      "max": 2823
+    },
+    {
+      "fromS": 750,
+      "count": 14745,
+      "p50": 149,
+      "p95": 275,
+      "max": 655
+    },
+    {
+      "fromS": 780,
+      "count": 13221,
+      "p50": 159,
+      "p95": 411,
+      "max": 1960
+    },
+    {
+      "fromS": 810,
+      "count": 12868,
+      "p50": 162,
+      "p95": 450,
+      "max": 3054
+    },
+    {
+      "fromS": 840,
+      "count": 13917,
+      "p50": 168,
+      "p95": 321,
+      "max": 736
+    },
+    {
+      "fromS": 870,
+      "count": 12141,
+      "p50": 179,
+      "p95": 484,
+      "max": 3046
+    },
+    {
+      "fromS": 900,
+      "count": 11861,
+      "p50": 175,
+      "p95": 454,
+      "max": 3147
+    },
+    {
+      "fromS": 930,
+      "count": 11513,
+      "p50": 188,
+      "p95": 550,
+      "max": 3060
+    },
+    {
+      "fromS": 960,
+      "count": 12619,
+      "p50": 185,
+      "p95": 352,
+      "max": 782
+    },
+    {
+      "fromS": 990,
+      "count": 10971,
+      "p50": 193,
+      "p95": 576,
+      "max": 3208
+    },
+    {
+      "fromS": 1020,
+      "count": 10885,
+      "p50": 196,
+      "p95": 589,
+      "max": 3060
+    },
+    {
+      "fromS": 1050,
+      "count": 10345,
+      "p50": 210,
+      "p95": 642,
+      "max": 3625
+    },
+    {
+      "fromS": 1080,
+      "count": 10243,
+      "p50": 220,
+      "p95": 628,
+      "max": 3433
+    },
+    {
+      "fromS": 1110,
+      "count": 6834,
+      "p50": 217,
+      "p95": 447,
+      "max": 898
+    }
+  ],
+  "convergedDocs": 30,
+  "perDoc": [
+    {
+      "docId": "ab5d6233-09d5-4c85-8686-335077c5cdd4",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "78d0834a-75d9-431b-85f8-829034cf0445",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "0969b960-7385-4988-af67-a4e73bfc70fb",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "6b4acee5-7c75-45bd-8ab3-4bceb47803d9",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "30e8acc4-6ab0-478e-9233-ad522f6b7202",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "8399c77c-9342-4e31-9ee5-ce22f8369a53",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "b897863c-6bfa-44fe-acde-2de42f8e86f0",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "046b8e34-fadc-4167-a1bb-e7d0738795cc",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "12c581c6-89e1-45f0-81bf-73fdfca756cd",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "72ada9a5-ec3f-4c07-85bc-15b65488c314",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "a8b81d1f-28dd-4a87-aa8d-2e5dac9e4c32",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "db66c641-2eeb-4744-8139-c5b1b561506c",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "d10c2d50-af5f-4931-b173-b10449d5f874",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "ccd8b0a2-5224-41cd-8f79-bf8234cd7022",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "3ee20d0f-a20e-4a05-8089-37d860abfbd9",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "0159c805-c004-44de-bca2-7fce11571a59",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "30bceb85-f1a5-4554-b31b-b31d0012f40f",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "246f4092-e7c0-463c-aad1-53d95ace2025",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "9ef4bf03-d9a0-41b3-889c-87ecc93e2114",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "9c77eead-ad92-406e-976d-20cd3e7e67de",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "f8ef7a94-8e40-4ae8-976b-23431d805dd9",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "18f6e43c-438d-47d1-b28c-dcde3025c66a",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "26adc224-7835-466e-bbe9-df9da174e1ed",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "c778f6b2-884c-4b7b-9fa2-dfdc02c4a945",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "6c1c3d59-b4c8-45ec-b3a1-72b8ef5d9e24",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "2292e591-012c-48ac-b774-8a973529bb80",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "a86243a2-1486-4f2c-ac3e-23c9257db1ce",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "70cbcb5a-eeb0-4ea6-81b3-c05213994b2d",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "38190d21-b0b5-4e58-9d1a-1e504005ba52",
+      "clients": 10,
+      "converged": true
+    },
+    {
+      "docId": "670f17e3-68c8-4dc0-8e53-64f789c7b999",
+      "clients": 10,
+      "converged": true
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "copies": 1,
+  "requests": 1500,
+  "runs": [
+    {
+      "target": "aws",
+      "startedAt": "2026-10-26T00:15:10.979Z",
+      "copies": 1,
+      "requests": 1500,
+      "linkId": "4816a5c1-80de-4c6e-a696-8bebc6d9be97",
+      "docId": "785b39f8-c4f7-45bb-96c0-db3aaea75c9f",
+      "durationMs": 4246,
+      "statuses": {
+        "200": 1,
+        "410": 29,
+        "429": 1470
+      },
+      "reserved": 1,
+      "latencyMs": {
+        "p50": 2314,
+        "p95": 3410,
+        "p99": 4057,
+        "max": 4191
+      },
+      "replay": {
+        "statuses": {
+          "429": 1
+        },
+        "sameUrl": 0,
+        "newTicket": 0
+      },
+      "networkErrors": 0,
+      "db": {
+        "remaining": 0,
+        "status": "epuise",
+        "activeFlag": null,
+        "reservations": 1
+      },
+      "ok": false
+    },
+    {
+      "target": "aws",
+      "startedAt": "2026-10-26T00:15:37.079Z",
+      "copies": 1,
+      "requests": 1500,
+      "linkId": "78646165-ba4a-446b-8a9e-86998c2a8e33",
+      "docId": "bbf52f36-4a80-4d6f-be66-fc036c1ebffd",
+      "durationMs": 3459,
+      "statuses": {
+        "429": 1500
+      },
+      "reserved": 0,
+      "latencyMs": {
+        "p50": 1841,
+        "p95": 3049,
+        "p99": 3201,
+        "max": 3456
+      },
+      "replay": {
+        "statuses": {},
+        "sameUrl": 0,
+        "newTicket": 0
+      },
+      "networkErrors": 0,
+      "db": {
+        "remaining": 1,
+        "status": "actif",
+        "activeFlag": "1",
+        "reservations": 0
+      },
+      "ok": false
+    }
+  ]
+}

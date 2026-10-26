@@ -7,6 +7,8 @@
  *   425 → pas encore ouvert : compte à rebours, puis rappel
  *   410 → épuisé : on N'interroge PLUS jamais (C6)
  *   429 → trop de tentatives depuis cette adresse : attente jusqu'à la fin du blocage
+ *   404 → lien inconnu : arrêt ; autre (5xx) → nouvel essai espacé (le visiteur n'est
+ *         jamais laissé sans réponse pendant un pic)
  */
 import { formatDateTime, h, mount } from "../dom.ts";
 
@@ -16,6 +18,7 @@ export function downloadPage(root: HTMLElement, linkId: string) {
   const fallback = h("p", { class: "discret" });
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
+  let failures = 0;
 
   const set = (text: string, kind: "attente" | "pret" | "epuise" | "erreur") => {
     state.textContent = text;
@@ -29,8 +32,9 @@ export function downloadPage(root: HTMLElement, linkId: string) {
     try {
       response = await fetch(`/api/links/${linkId}/claim`, { method: "POST", credentials: "same-origin" });
     } catch {
+      failures++;
       set("Connexion difficile, nouvel essai dans quelques secondes…", "erreur");
-      timer = setTimeout(claim, 3_000);
+      timer = setTimeout(claim, Math.min(30_000, 2_000 * 2 ** Math.min(failures, 4)) * (0.5 + Math.random()));
       return;
     }
     const body = (await response.json().catch(() => ({}))) as {
@@ -64,10 +68,17 @@ export function downloadPage(root: HTMLElement, linkId: string) {
         set("Tous les exemplaires ont été téléchargés. Ce lien est épuisé.", "epuise");
         button.hidden = true;
         return;
-      default:
+      case 404:
         stopped = true;
         set("Ce lien n'existe pas.", "erreur");
         button.hidden = true;
+        return;
+      default:
+        // 5xx (pic, montée en charge) : on réessaie en espaçant, sans jamais abandonner.
+        failures++;
+        set("Le service est très sollicité, nouvel essai automatique dans quelques secondes…", "attente");
+        timer = setTimeout(claim, Math.min(30_000, 2_000 * 2 ** Math.min(failures, 4)) * (0.5 + Math.random()));
+        return;
     }
   };
 

@@ -1,0 +1,692 @@
+openapi: 3.0.3
+info:
+  title: Éditeur de documents partagé — API
+  version: 0.7.0
+  description: |
+    API HTTP de l'éditeur partagé. Toutes les routes sont servies derrière CloudFront
+    (`https://<distribution>.cloudfront.net`), en HTTPS uniquement.
+
+    **Identité des rédacteurs.** Pas de vrais comptes : `POST /api/session` avec un nom et
+    un e-mail renvoie un jeton signé (HMAC-SHA256, valable 24 h), à passer ensuite dans
+    l'en-tête `Authorization: Bearer <jeton>`.
+
+    **Visiteurs.** Le téléchargement (`POST /api/links/{linkId}/claim`) ne demande aucune
+    identité. Un visiteur qui obtient un exemplaire reçoit un cookie `ticket` (signé, 2 min)
+    qui lui permet de revenir chercher **le même** exemplaire sans en consommer un autre.
+
+    **Garantie C1.** Un lien créé avec `max = K` donne exactement K réponses 200 ou 202
+    porteuses d'un nouveau ticket, quel que soit le nombre de clics simultanés ; toutes les
+    autres réponses aux clics sans ticket sont 410 (une fois le stock épuisé).
+
+    **Mise en cache.** Les réponses du clic portent toujours `Cache-Control: no-store`.
+
+    **Statut de ce document.** Couvre les routes HTTP des étapes 1 à 6 ; le protocole temps
+    réel (WebSocket `/collab`, Hocuspocus) est décrit dans le dossier de conception.
+servers:
+  - url: https://{distribution}.cloudfront.net
+    variables:
+      distribution:
+        default: exemple
+        description: Domaine CloudFront affiché en sortie du déploiement (`Url`).
+  - url: http://localhost:3000
+    description: Développement local
+
+tags:
+  - name: admin
+  - name: santé
+  - name: session
+  - name: documents
+  - name: liens
+
+paths:
+  /sante:
+    get:
+      tags: [santé]
+      summary: Contrôle de santé (ALB, Auto Scaling)
+      description: Ne dépend d'aucun service AWS.
+      responses:
+        "200":
+          description: Instance en état de servir.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/NoStore" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  statut: { type: string, enum: [ok] }
+              example: { statut: ok }
+
+  /api/session:
+    post:
+      tags: [session]
+      summary: Ouvrir une session de rédacteur
+      description: |
+        L'e-mail est normalisé (minuscules, espaces retirés) et sert d'identifiant :
+        crédit d'écriture, droits sur les documents et blocages lui sont rattachés.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email]
+              additionalProperties: false
+              properties:
+                name: { type: string, minLength: 1, maxLength: 80 }
+                email: { type: string, minLength: 3, maxLength: 254 }
+            example: { name: Alan, email: " Alan@Exemple.ORG" }
+      responses:
+        "200":
+          description: Session ouverte.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, email, name]
+                properties:
+                  token: { type: string, description: "Jeton de session, valable 24 h." }
+                  email: { type: string, description: "E-mail normalisé." }
+                  name: { type: string }
+              example: { token: "eyJlbWFpbCI6...Rk0", email: alan@exemple.org, name: Alan }
+        "400":
+          description: Corps invalide ou adresse e-mail invalide.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Erreur" }
+              example: { erreur: identite-invalide }
+
+  /api/documents:
+    get:
+      tags: [documents]
+      summary: Lister les documents dont on est éditeur
+      description: Triés par titre. Lecture filtrée de la table des documents (volume d'une association).
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: Documents.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documents:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        docId: { $ref: "#/components/schemas/Id" }
+                        title: { type: string }
+                        ownerEmail: { type: string }
+        "401": { $ref: "#/components/responses/SessionInvalide" }
+    post:
+      tags: [documents]
+      summary: Créer un document
+      description: Le créateur en devient propriétaire et seul éditeur.
+      security: [{ session: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              additionalProperties: false
+              properties:
+                title: { type: string, minLength: 1, maxLength: 200 }
+      responses:
+        "201":
+          description: Document créé.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  docId: { $ref: "#/components/schemas/Id" }
+                  title: { type: string }
+        "400": { $ref: "#/components/responses/CorpsInvalide" }
+        "401": { $ref: "#/components/responses/SessionInvalide" }
+
+  /api/documents/{docId}:
+    get:
+      tags: [documents]
+      summary: Détail d'un document (éditeurs uniquement)
+      security: [{ session: [] }]
+      parameters:
+        - { name: docId, in: path, required: true, schema: { $ref: "#/components/schemas/Id" } }
+      responses:
+        "200":
+          description: Document.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  docId: { $ref: "#/components/schemas/Id" }
+                  title: { type: string }
+                  ownerEmail: { type: string }
+                  editors: { type: array, items: { type: string } }
+                  seq: { type: integer, description: "Dernière séquence acceptée du journal." }
+        "401": { $ref: "#/components/responses/SessionInvalide" }
+        "403": { description: Pas éditeur du document. }
+        "404": { description: Document inconnu. }
+
+  /api/documents/{docId}/title:
+    post:
+      tags: [documents]
+      summary: Renommer un document (éditeurs uniquement)
+      security: [{ session: [] }]
+      parameters:
+        - { name: docId, in: path, required: true, schema: { $ref: "#/components/schemas/Id" } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              additionalProperties: false
+              properties:
+                title: { type: string, minLength: 1, maxLength: 200 }
+            example: { title: "Journal — novembre 2026" }
+      responses:
+        "200":
+          description: Titre enregistré (espaces de début et de fin retirés).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  docId: { $ref: "#/components/schemas/Id" }
+                  title: { type: string }
+        "400":
+          description: Titre vide ou corps invalide.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Erreur" }
+              example: { erreur: titre-invalide }
+        "401": { $ref: "#/components/responses/SessionInvalide" }
+        "403": { description: Pas éditeur du document. }
+        "404": { description: Document inconnu. }
+
+  /api/documents/{docId}/versions:
+    get:
+      tags: [documents]
+      summary: Versions d'un document (50 plus récentes)
+      description: |
+        Instantanés de compaction (« automatique ») et versions nommées. L'enregistrement et
+        la restauration passent par la connexion temps réel (messages `enregistrer` et
+        `restaurer`) : une restauration est écrite dans le journal comme une modification,
+        sans consommer de crédit.
+      security: [{ session: [] }]
+      parameters:
+        - { name: docId, in: path, required: true, schema: { $ref: "#/components/schemas/Id" } }
+      responses:
+        "200":
+          description: Versions, de la plus récente à la plus ancienne.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        createdAt: { type: string, format: date-time }
+                        seq: { type: integer }
+                        label: { type: string }
+                        author: { type: string, nullable: true }
+                        snapshotKey: { type: string }
+        "401": { $ref: "#/components/responses/SessionInvalide" }
+        "403": { description: Pas éditeur du document. }
+        "404": { description: Document inconnu. }
+
+  /api/me/credit:
+    get:
+      tags: [session]
+      summary: Crédit d'écriture du jour (affichage)
+      description: Jour UTC. La garantie C4 est assurée par le serveur temps réel, pas par cette route.
+      security: [{ session: [] }]
+      responses:
+        "200":
+          description: Crédit.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  used: { type: integer }
+                  remaining: { type: integer }
+                  limit: { type: integer, example: 10000 }
+        "401": { $ref: "#/components/responses/SessionInvalide" }
+
+  /api/documents/{docId}/editors:
+    post:
+      tags: [documents]
+      summary: Partager un document avec un autre rédacteur
+      description: |
+        Réservé aux éditeurs du document ; le nouvel éditeur a les mêmes droits (écrire,
+        partager, créer des liens). Ajouter un éditeur déjà présent ne change rien.
+      security: [{ session: [] }]
+      parameters:
+        - name: docId
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/Id" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              additionalProperties: false
+              properties:
+                email: { type: string, minLength: 3, maxLength: 254 }
+            example: { email: redaction@exemple.org }
+      responses:
+        "200":
+          description: Éditeur ajouté (e-mail normalisé).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  docId: { $ref: "#/components/schemas/Id" }
+                  email: { type: string }
+        "400":
+          description: Corps invalide ou adresse e-mail invalide.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Erreur" }
+              example: { erreur: identite-invalide }
+        "401": { $ref: "#/components/responses/SessionInvalide" }
+        "403":
+          description: Le rédacteur n'est pas éditeur du document.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Erreur" }
+              example: { erreur: acces-refuse }
+        "404":
+          description: Document inconnu.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Erreur" }
+              example: { erreur: document-inconnu }
+
+  /api/documents/{docId}/links:
+    get:
+      tags: [liens]
+      summary: Liens du document (le lien actif d'abord, puis les plus récents)
+      description: Affichage dans l'éditeur, rafraîchi toutes les 5 s (exemplaires restants).
+      security: [{ session: [] }]
+      parameters:
+        - { name: docId, in: path, required: true, schema: { $ref: "#/components/schemas/Id" } }
+      responses:
+        "200":
+          description: Liens.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  links: { type: array, items: { $ref: "#/components/schemas/Lien" } }
+        "401": { $ref: "#/components/responses/SessionInvalide" }
+        "403": { description: Pas éditeur du document. }
+        "404": { description: Document inconnu. }
+    post:
+      tags: [liens]
+      summary: Créer un lien de téléchargement
+      description: |
+        Réservé aux éditeurs du document. Le lien donne toujours le document **tel qu'il
+        est au moment du clic** (C3), jamais tel qu'il était à la création du lien.
+        `opensAt` (optionnel) : avant cette heure, le clic répond 425.
+        Le PDF de l'état actuel est préparé dès la création : si personne n'écrit
+        d'ici les premiers clics, ils reçoivent directement 200.
+        **Un seul lien actif par document** : tant qu'un lien a des exemplaires, une
+        nouvelle création répond 409 avec ce lien ; il faut l'épuiser ou le fermer
+        (`POST /api/links/{linkId}/close`). Deux créations simultanées : une seule réussit.
+      security: [{ session: [] }]
+      parameters:
+        - name: docId
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/Id" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [max]
+              additionalProperties: false
+              properties:
+                max: { type: integer, minimum: 1, maximum: 100000, description: "Nombre de téléchargements autorisés." }
+                opensAt: { type: string, format: date-time, description: "Heure d'ouverture (ISO 8601)." }
+            example: { max: 500, opensAt: "2026-11-01T18:00:00Z" }
+      responses:
+        "201":
+          description: Lien créé.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  linkId: { $ref: "#/components/schemas/Id" }
+                  max: { type: integer }
+                  opensAt: { type: string, format: date-time, nullable: true }
+                  claimPath: { type: string, example: "/api/links/0b6d…/claim" }
+        "400": { $ref: "#/components/responses/CorpsInvalide" }
+        "401": { $ref: "#/components/responses/SessionInvalide" }
+        "403":
+          description: Le rédacteur n'est pas éditeur du document.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Erreur" }
+              example: { erreur: acces-refuse }
+        "404":
+          description: Document inconnu.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Erreur" }
+              example: { erreur: document-inconnu }
+        "409":
+          description: Le document a déjà un lien actif.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  erreur: { type: string, enum: [lien-actif-existant] }
+                  lien: { $ref: "#/components/schemas/Lien" }
+
+  /api/links/{linkId}/close:
+    post:
+      tags: [liens]
+      summary: Fermer un lien avant épuisement (éditeurs du document)
+      description: |
+        Le stock est remis à 0 en une écriture atomique : les clics suivants reçoivent 410,
+        les exemplaires déjà réservés restent téléchargeables (ticket), et le document
+        peut recevoir un nouveau lien. Idempotent : fermer un lien déjà fermé ou épuisé
+        renvoie son état.
+      security: [{ session: [] }]
+      parameters:
+        - { name: linkId, in: path, required: true, schema: { $ref: "#/components/schemas/Id" } }
+      responses:
+        "200":
+          description: État du lien après fermeture.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Lien" }
+        "401": { $ref: "#/components/responses/SessionInvalide" }
+        "403": { description: Pas éditeur du document du lien. }
+        "404": { description: Lien inconnu. }
+
+  /api/links/{linkId}/claim:
+    post:
+      tags: [liens]
+      summary: Cliquer sur un lien de téléchargement
+      description: |
+        Aucune identité demandée. Le visiteur sait toujours où il en est :
+
+        | Code | `etat` | Signification | Que faire |
+        |---|---|---|---|
+        | 200 | `pret` | Exemplaire disponible | Télécharger `url` (valable 60 s) |
+        | 202 | `patienter` | Exemplaire **réservé**, PDF en préparation | Rappeler après `Retry-After` (le cookie `ticket` est renvoyé automatiquement) |
+        | 425 | `pas-ouvert` | Avant `opensAt` | Rappeler après `Retry-After` |
+        | 410 | `epuise` | Plus aucun exemplaire | Arrêter d'interroger |
+        | 429 | `bloque` | Trop de requêtes depuis cette adresse (blocage 10 min) | Rappeler après `Retry-After` |
+        | 404 | `inconnu` | Lien inexistant | — |
+
+        **Premier clic (sans ticket).** Réserver = consommer : le stock est décrémenté de façon
+        atomique, à condition qu'il reste au moins un exemplaire. En cas de succès, la réponse
+        (200 ou 202) pose le cookie `ticket`.
+
+        **Clics suivants (avec ticket).** Le serveur relit la réservation : jamais de nouvel
+        exemplaire consommé, jamais de nouveau cookie. Une réservation n'a qu'**une seule URL
+        valide à la fois** : tant qu'elle n'a pas expiré, le même clic renvoie la même URL ;
+        une fois expirée (ticket encore valide), une nouvelle URL la remplace, sur le **même**
+        PDF. Deux retours simultanés obtiennent la même nouvelle URL. Le détenteur d'un ticket
+        valide est servi même après l'épuisement du lien.
+
+        **Contenu du PDF (C3).** Le PDF délivré contient au moins toutes les modifications
+        acceptées avant le clic : le clic fixe `seqRequis` (séquence du document, lue de façon
+        fortement cohérente) et l'URL n'est donnée que lorsqu'un PDF de séquence ≥ `seqRequis`
+        est entièrement écrit. Ce PDF est un état cohérent du document (journal rejoué jusqu'à
+        sa séquence), jamais un mélange. En attendant : 202, le PDF est généré (une génération
+        sert toutes les demandes en attente).
+
+        **Lien pas encore ouvert (425).** Nous utilisons `425 Too Early` (RFC 8470) dans un sens
+        élargi : le lien existe mais son heure d'ouverture (`opensAt`) n'est pas atteinte. Aucun
+        exemplaire n'est consommé ; le client rappelle après `Retry-After` (entre 5 et 62 s,
+        avec une part aléatoire de 0 à 2 s pour étaler les retours), et peut afficher `opensAt`.
+
+        **Anti-abus (429).** Au-delà de 30/N requêtes en 10 s depuis une même adresse (N =
+        instances API), l'adresse est bloquée 10 min. Les rappels d'un visiteur qui détient
+        un ticket valide pour ce lien ne sont pas comptés. Toute autre réponse (5xx pendant
+        un pic) doit être réessayée par le client avec un délai croissant ; seul 404 arrête.
+
+        **Limites assumées.** Un exemplaire réservé puis abandonné n'est pas remis en stock.
+        L'URL pré-signée est réutilisable pendant ses 60 s de validité.
+      parameters:
+        - name: linkId
+          in: path
+          required: true
+          schema: { $ref: "#/components/schemas/Id" }
+        - name: ticket
+          in: cookie
+          required: false
+          description: Ticket reçu au premier clic (signé, 2 min, `Path=/api/links/{linkId}`).
+          schema: { type: string }
+      responses:
+        "200":
+          description: Exemplaire disponible.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/NoStore" }
+            Set-Cookie: { $ref: "#/components/headers/Ticket" }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [etat, url, expiresAt]
+                properties:
+                  etat: { type: string, enum: [pret] }
+                  url: { type: string, format: uri, description: "URL pré-signée S3 (GET), valable 60 s ; renouvelée sur le même PDF si elle a expiré et que le ticket est valide." }
+                  expiresAt: { type: string, format: date-time }
+        "202":
+          description: Exemplaire réservé, PDF en préparation.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/NoStore" }
+            Retry-After: { $ref: "#/components/headers/RetryAfter" }
+            Set-Cookie: { $ref: "#/components/headers/Ticket" }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [etat, retryAfter]
+                properties:
+                  etat: { type: string, enum: [patienter] }
+                  retryAfter: { type: integer, description: "Secondes." }
+              example: { etat: patienter, retryAfter: 2 }
+        "404":
+          description: Lien inconnu ou identifiant mal formé.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/NoStore" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Etat" }
+              example: { etat: inconnu }
+        "410":
+          description: Lien épuisé.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/NoStore" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Etat" }
+              example: { etat: epuise }
+        "429":
+          description: |
+            Anti-abus : plus de 30/N requêtes en 10 s depuis la même adresse (N = instances API ;
+            adresse lue dans `CloudFront-Viewer-Address`). Blocage de 10 min, aucun exemplaire consommé.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/NoStore" }
+            Retry-After: { $ref: "#/components/headers/RetryAfter" }
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  etat: { type: string, enum: [bloque] }
+                  finLe: { type: string, format: date-time }
+                  retryAfter: { type: integer }
+        "425":
+          description: |
+            Lien pas encore ouvert : `opensAt` est dans le futur. Aucun exemplaire consommé ;
+            rappeler après `Retry-After`.
+          headers:
+            Cache-Control: { $ref: "#/components/headers/NoStore" }
+            Retry-After: { $ref: "#/components/headers/RetryAfter" }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [etat, opensAt, retryAfter]
+                properties:
+                  etat: { type: string, enum: [pas-ouvert] }
+                  opensAt: { type: string, format: date-time }
+                  retryAfter: { type: integer, minimum: 1, maximum: 60 }
+
+  /api/admin/documents-ouverts:
+    get:
+      tags: [admin]
+      summary: Documents ouverts (battement du serveur temps réel il y a moins de 90 s)
+      security: [{ admin: [] }]
+      responses:
+        "200":
+          description: Documents ouverts, les plus fréquentés d'abord.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documents:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        docId: { $ref: "#/components/schemas/Id" }
+                        title: { type: string }
+                        connected: { type: integer }
+                        lastBeat: { type: string, format: date-time }
+        "401": { description: Jeton admin absent ou invalide. }
+
+  /api/admin/liens-actifs:
+    get:
+      tags: [admin]
+      summary: Liens actifs et exemplaires restants (index creux liens-actifs)
+      security: [{ admin: [] }]
+      responses:
+        "200":
+          description: Liens non épuisés.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  liens:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        linkId: { $ref: "#/components/schemas/Id" }
+                        docId: { $ref: "#/components/schemas/Id" }
+                        creatorEmail: { type: string }
+                        max: { type: integer }
+                        remaining: { type: integer }
+                        opensAt: { type: string, format: date-time, nullable: true }
+        "401": { description: Jeton admin absent ou invalide. }
+
+  /api/admin/blocages:
+    get:
+      tags: [admin]
+      summary: Blocages en cours (rédacteurs 5 h, visiteurs 10 min), filtrés sur expireLe
+      security: [{ admin: [] }]
+      responses:
+        "200":
+          description: Blocages non expirés.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  blocages:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        subject: { type: string, example: "writer#alan@exemple.org" }
+                        reason: { type: string }
+                        expireLe: { type: string, format: date-time }
+        "401": { description: Jeton admin absent ou invalide. }
+
+components:
+  securitySchemes:
+    admin:
+      type: apiKey
+      in: header
+      name: x-admin-token
+      description: Jeton d'administration (SSM `/editeur/admin-token`), comparé à temps constant.
+    session:
+      type: http
+      scheme: bearer
+      description: Jeton renvoyé par `POST /api/session`.
+
+  schemas:
+    Id:
+      type: string
+      format: uuid
+      pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    Erreur:
+      type: object
+      required: [erreur]
+      properties:
+        erreur: { type: string }
+    Lien:
+      type: object
+      properties:
+        linkId: { $ref: "#/components/schemas/Id" }
+        max: { type: integer }
+        remaining: { type: integer, description: "Exemplaires encore disponibles (0 si épuisé ou fermé)." }
+        served: { type: integer, description: "Exemplaires réservés par des visiteurs." }
+        status: { type: string, enum: [actif, epuise, ferme] }
+        opensAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    Etat:
+      type: object
+      required: [etat]
+      properties:
+        etat: { type: string, enum: [pret, patienter, pas-ouvert, epuise, bloque, inconnu] }
+
+  headers:
+    NoStore:
+      schema: { type: string, enum: [no-store] }
+    RetryAfter:
+      description: Délai conseillé avant de réinterroger, en secondes.
+      schema: { type: integer }
+    Ticket:
+      description: |
+        Présent seulement sur le premier clic qui réserve un exemplaire :
+        `ticket=<jeton>; Max-Age=120; Path=/api/links/{linkId}; HttpOnly; Secure; SameSite=Lax`.
+      schema: { type: string }
+
+  responses:
+    CorpsInvalide:
+      description: Corps ou paramètres invalides (validation JSON Schema).
+    SessionInvalide:
+      description: Jeton absent, falsifié ou expiré.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Erreur" }
+          example: { erreur: session-invalide }

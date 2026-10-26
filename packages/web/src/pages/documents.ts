@@ -1,7 +1,8 @@
 // Liste des documents dont on est éditeur, création d'un document.
 import { api, errorText } from "../api.ts";
 import { h, mount } from "../dom.ts";
-import { clearSession, session } from "../session.ts";
+import { session } from "../session.ts";
+import { userMenu } from "./common.ts";
 
 interface DocumentSummary {
   docId: string;
@@ -11,8 +12,8 @@ interface DocumentSummary {
 
 export function documentsPage(root: HTMLElement, navigate: (path: string) => void) {
   const me = session()!;
-  const list = h("ul", { class: "liste" }, h("li", { class: "discret" }, "Chargement…"));
-  const title = h("input", { required: true, maxLength: 200, placeholder: "Titre du document" });
+  const list = h("ul", { class: "grille-documents" }, h("li", { class: "discret" }, "Chargement…"));
+  const title = h("input", { required: true, maxLength: 200, placeholder: "Titre du nouveau document" });
   const error = h("p", { class: "erreur", role: "alert" });
 
   const load = async () => {
@@ -20,13 +21,17 @@ export function documentsPage(root: HTMLElement, navigate: (path: string) => voi
       const { documents } = await api<{ documents: DocumentSummary[] }>("GET", "/api/documents");
       mount(
         list,
-        ...(documents.length === 0 ? [h("li", { class: "discret" }, "Aucun document pour l'instant.")] : []),
+        ...(documents.length === 0 ? [h("li", { class: "discret" }, "Aucun document pour l'instant : créez le premier ci-dessus.")] : []),
         ...documents.map((d) =>
           h(
             "li",
             {},
-            h("a", { href: `/doc/${d.docId}`, onclick: (e: Event) => (e.preventDefault(), navigate(`/doc/${d.docId}`)) }, d.title),
-            h("span", { class: "discret" }, d.ownerEmail === me.email ? " — vous en êtes le créateur" : ` — créé par ${d.ownerEmail}`),
+            h(
+              "a",
+              { class: "carte-document", href: `/doc/${d.docId}`, onclick: (e: Event) => (e.preventDefault(), navigate(`/doc/${d.docId}`)) },
+              h("span", { class: "titre-carte" }, d.title),
+              h("span", { class: "discret" }, d.ownerEmail === me.email ? "Vous en êtes le créateur" : `Partagé par ${d.ownerEmail}`),
+            ),
           ),
         ),
       );
@@ -37,26 +42,15 @@ export function documentsPage(root: HTMLElement, navigate: (path: string) => voi
 
   mount(
     root,
-    h(
-      "header",
-      { class: "barre" },
-      h("strong", {}, "Éditeur du journal"),
-      h(
-        "span",
-        {},
-        `${me.name} (${me.email}) `,
-        h("button", { class: "lien", onclick: () => (clearSession(), navigate("/")) }, "Changer d'identité"),
-      ),
-    ),
+    h("header", { class: "barre" }, h("strong", { class: "marque" }, "Éditeur du journal"), userMenu(me, navigate)),
     h(
       "main",
       { class: "carte" },
       h("h1", {}, "Mes documents"),
-      list,
       h(
         "form",
         {
-          class: "ligne",
+          class: "ligne creation",
           onsubmit: async (event: Event) => {
             event.preventDefault();
             try {
@@ -71,6 +65,7 @@ export function documentsPage(root: HTMLElement, navigate: (path: string) => voi
         h("button", { type: "submit" }, "Créer"),
       ),
       error,
+      list,
     ),
   );
   void load();
