@@ -10,6 +10,7 @@ Commandes pour tout rejouer : [README](../README.md#tester).
 | Niveau | Outil | Contre quoi | Quand |
 |---|---|---|---|
 | Unitaires et intégration | Vitest 4 (113 tests, `npm test`) | DynamoDB Local, vrais serveurs Fastify et Hocuspocus en mémoire, vrais clients Yjs | À chaque étape |
+| Vérifié sur AWS le 26/10 (après le déploiement de 04:13) | e-mail du dernier exemplaire : lien de 1 exemplaire, clic 200 puis 410, journal « dernier exemplaire réservé », SES `SentLast24Hours` = 1 (un seul envoi) ; fermeture d'un lien à heure d'ouverture : la montée programmée disparaît, la descente est avancée (minimum 1) |
 | Infrastructure | Vitest + `aws-cdk-lib/assertions` | Gabarits CloudFormation synthétisés (IAM exacte, aucun `Resource: *` hors exception, ports, étiquettes) | À chaque étape |
 | Scénarios de contraintes | Scripts `tests/c1..c4` | Local **et** déploiement AWS (CloudFront → ALB → instances) | Étapes 2 à 6 |
 | Charge (C5, C6) | k6 v2.2.0 + 300 vrais clients Yjs | Déploiement AWS, depuis une instance EC2 dédiée en eu-north-1 (`EditeurPartageCharge`) | Étape 7 |
@@ -172,6 +173,7 @@ cette séquence (aucun état intermédiaire incohérent).
 | `c3/2026-10-26T00-08-58-684Z-aws.json` | 200 en 0,3 s | 200 sans rappel, `pdfSeq` 2 ≥ dernier ack 2, PDF valide | OK |
 | `c3/2026-10-26T00-35-08-736Z-aws.json` (après la refonte : un seul lien, créé avant la modification) | — | 202 puis 200 après 1 rappel, `pdfSeq` 3 ≥ dernier ack 2, PDF valide | OK |
 | `c3/2026-10-26T00-46-01-168Z-aws.json` (front redéployé) | 200 en 0,5 s | 202 puis 200 après 1 rappel, `pdfSeq` 3 ≥ dernier ack 2, PDF valide | OK |
+| `c3/2026-10-26T04-20-32-642Z-aws.json` (après le déploiement du 26/10 04:13) | — | — | OK |
 
 ## 5. C4 — jamais plus que le crédit du jour, même depuis plusieurs appareils
 
@@ -186,6 +188,7 @@ deux documents depuis la base et le crédit consommé.
 | `c4/2026-10-26T00-17-29-641Z-aws.json` | 35 700 | 6 300 + 3 500 = 9 800 | 9 800 | 4001 × 3 | OK |
 | `c4/2026-10-26T00-34-48-128Z-aws.json` (après la refonte) | 38 500 | 9 800 | 9 800 | 4001 × 3 | OK |
 | `c4/2026-10-26T00-46-11-341Z-aws.json` (front redéployé) | — | 9 800 | 9 800 | 4001 × 3 | OK |
+| `c4/2026-10-26T04-20-51-194Z-aws.json` (après le déploiement du 26/10 04:13) | — | 9 800 | 9 800 | 4001 × 3 | OK |
 
 9 800 = 14 blocs de 700 : le 15ᵉ aurait dépassé 10 000. Le total accepté est égal au
 crédit débité (le débit est dans la même transaction que le journal) et ne dépasse jamais
@@ -272,7 +275,7 @@ derrière un même NAT (campus, 4G) n'est pas mesuré (voir dossier §8, limite 
 | Refus et resynchronisation | 4001 à exactement 10 000 caractères ; Y.Doc détruit et recréé ; contenu non texte ou format inconnu refusé (4400) ; ni le format ni la suppression ne débitent de crédit |
 | Anti-abus rédacteur | 5 refus en 1 min → 4003 pendant 5 h ; le rédacteur bloqué lit toujours le document |
 | Anti-abus visiteur | seuil 30/N, blocage 10 min écrit en base et partagé, 429 + `Retry-After`, adresse exemptée |
-| Liens | un seul lien actif par document (deux créations simultanées → une seule), fermeture (410 ensuite, réservations honorées), compteur affiché décroissant, renommage, droits |
+| Liens | un seul lien actif par document (deux créations simultanées → une seule), fermeture (410 ensuite ; réservation en attente honorée, exemplaire déjà remis non retéléchargeable ; actions programmées retirées), compteur affiché décroissant, renommage, droits |
 | URL expirée | nouvelle URL sur le même PDF, une seule valide à la fois, même sous retours simultanés |
 | PDF | un seul rendu pour des demandes simultanées, `pdfSeq` ne recule jamais, document fermé rechargé, mise en forme rendue avec les bonnes polices |
 | Versions | version nommée, aperçu, restauration (texte et mise en forme) comme nouvelle modification sans crédit, refus d'un instantané d'un autre document |
